@@ -11,33 +11,19 @@ const queueStack: Set<CallableFunction> = new Set()
 const nextTicks: Set<CallableFunction> = new Set()
 
 /**
- * A map of node types to their respective interfaces.
- */
-type NodeTypes = {
-  1: Element
-  8: Comment
-  11: DocumentFragment
-}
-
-/**
  * Adds the ability to listen to the next tick.
  * @param  {CallableFunction} fn?
  * @returns Promise
  */
 export function nextTick(fn?: CallableFunction): Promise<unknown> {
-  if (!queueStack.size) {
-    if (fn) fn()
-    return Promise.resolve()
-  }
-  let resolve: (value?: unknown) => void
-  const p = new Promise((r) => {
-    resolve = r
-  })
-  nextTicks.add(() => {
-    if (fn) fn()
-    resolve()
-  })
-  return p
+  return !queueStack.size
+    ? Promise.resolve(fn?.())
+    : new Promise((resolve: (value?: unknown) => void) =>
+        nextTicks.add(() => {
+          fn?.()
+          resolve()
+        })
+      )
 }
 
 export function isTpl(template: unknown): template is ArrowTemplate {
@@ -54,13 +40,6 @@ export function isR(obj: unknown): obj is Reactive<ReactiveTarget> {
 
 export function isChunk(chunk: unknown): chunk is Chunk {
   return isO(chunk) && '$' in chunk
-}
-
-export function isType<T extends keyof NodeTypes>(
-  obj: Node,
-  type: T
-): obj is NodeTypes[T] {
-  return obj.nodeType === type
 }
 
 /**

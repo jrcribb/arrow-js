@@ -1,11 +1,9 @@
 import { watch } from './reactive'
-import { isChunk, isTpl, isType, queue } from './common'
+import { isChunk, isTpl, queue } from './common'
 import { setAttr } from './dom'
 import {
-  bindExpressionAttr,
-  bindExpressionText,
   expressionPool,
-  replaceExpressions,
+  onExpressionUpdate,
   releaseExpressions,
   storeExpressions,
   updateExpressions,
@@ -37,38 +35,6 @@ export interface ArrowTemplate {
    */
   key: (key: ArrowTemplateKey) => ArrowTemplate
   /**
-   * Allows memoization of a template, will prevent patching.
-   * @param memoKey - A unique key that identifies this template as "unchanged".
-   * @returns
-   */
-  memo: (memoKey: ArrowMemoKey) => ArrowTemplate
-  /**
-   * Updates this template instance’s expression slots in place.
-   * @param expSlots - The next expression values.
-   * @returns
-   */
-  update: (...expSlots: ArrowExpression[]) => ArrowTemplate
-  /**
-   * Allows a template instance to be recycled after unmount for later reuse.
-   * This is an aggressive optimization intended for repeated same-shape views.
-   * @returns
-   */
-  pool: () => ArrowTemplate
-  /**
-   * Explicitly detaches and recycles this template instance.
-   * @returns
-   */
-  recycle: () => ArrowTemplate
-  /**
-   * A globally unique identifier for this template. If an explicit id is
-   * provided, the template will be stored under that id during memoization and
-   * the subsequent uses of `html` will use that lookup rather than the HTML
-   * itself.
-   * @param id - Globally unique identifier.
-   * @returns
-   */
-  id: (id: string) => ArrowTemplate
-  /**
    * Yields the underlying chunk object that is used to render this template.
    * @returns
    * @internal
@@ -86,21 +52,11 @@ export interface ArrowTemplate {
    */
   _k: ArrowTemplateKey
   /**
-   * The memo key.
+   * The allowed values for arrow keys.
    */
-  _m: ArrowMemoKey
-  /**
-   * The recycling pool key.
-   */
-  _p?: string
 }
 
-/**
- * The allowed values for arrow keys.
- */
 type ArrowTemplateKey = string | number | undefined
-type ArrowMemoValue = string | number | boolean | null | undefined
-type ArrowMemoKey = ArrowMemoValue | readonly ArrowMemoValue[]
 
 /**
  * Types of return values that can be rendered.
@@ -214,32 +170,18 @@ export interface Chunk {
    */
   k?: ArrowTemplateKey
   /**
-   * A memoization key, used for rendering lists.
-   */
-  m?: ArrowMemoKey
-  /**
-   * An abort controller to terminate all event listeners in this chunk.
-   */
-  a?: AbortController | null
-  /**
    * Cleanup callbacks for reactive bindings in this chunk.
    */
   u?: Array<() => void> | null
-  /**
-   * Optional recycling pool key for aggressive chunk reuse.
-   */
-  p?: string
 }
 
 /**
  * A partial chunk is a chunk that has been partially mounted. It is missing
  * some assignments, but already has their space reserved (mem performance).
  */
-type PartialChunk = Omit<Chunk, '_t' | 'k' | 'a' | 'm' | 'ref'> & {
+type PartialChunk = Omit<Chunk, '_t' | 'k' | 'ref'> & {
   _t: () => null
   k: null
-  a: null
-  m: null
   ref: null
   u: null
 }
@@ -270,68 +212,11 @@ const delimiterComment = `<!--${delimiter}-->`
  * A memo of pathed chunks that have been created.
  */
 const chunkMemo: Record<string, PartialChunk> = {}
-const eventHandlers: Record<string, EventListener> = {}
-const delegatedEvents = new WeakMap<EventTarget, Record<string, 1>>()
-const delegateableEvents: Record<string, 1> = { click: 1 }
-const pooledChunks: Record<string, Chunk[]> = {}
-const pooledChunkLimit = 12000
-let pooledChunkCount = 0
-const releaseTemplateExpressions = Symbol()
-const disposeTemplateState = Symbol()
-const adoptTemplateState = Symbol()
-const orphanTemplateState = Symbol()
-const shapeKey = Symbol()
-const delegatedEventMark = Symbol()
-const renderMark = Symbol()
 
 type Rendered = Chunk | Text | Comment
 type InternalTemplate = ArrowTemplate & {
-  [releaseTemplateExpressions]: () => void
-  [disposeTemplateState]: () => void
-  [adoptTemplateState]: (nextChunk: Chunk, nextPointer: number) => void
-  [orphanTemplateState]: () => void
-  [shapeKey]: string
-}
-type InternalChunk = Chunk & { [shapeKey]?: string }
-
-function releaseTemplate(template: ArrowTemplate) {
-  ;(template as InternalTemplate)[releaseTemplateExpressions]?.()
-}
-
-function takePooledChunk(poolKey: string | undefined) {
-  if (!poolKey) return
-  const pool = pooledChunks[poolKey]
-  if (!pool?.length) return
-  pooledChunkCount--
-  return pool.pop()
-}
-
-function poolChunk(chunk: Chunk) {
-  const poolKey = chunk.p
-  if (chunk.ref.f?.parentNode === chunk.dom) return true
-  if (
-    !poolKey ||
-    chunk.k !== undefined ||
-    chunk.u ||
-    chunk.a ||
-    pooledChunkCount >= pooledChunkLimit
-  ) {
-    return false
-  }
-  appendDOMRef(chunk.ref, chunk.dom)
-  ;(pooledChunks[poolKey] ??= []).push(chunk)
-  pooledChunkCount++
-  return true
-}
-
-function sameMemo(left: ArrowMemoKey, right: ArrowMemoKey | undefined) {
-  if (left === right) return true
-  if (!Array.isArray(left) || !Array.isArray(right)) return false
-  if (left.length !== right.length) return false
-  for (let i = 0; i < left.length; i++) {
-    if (left[i] !== right[i]) return false
-  }
-  return true
+  d?: () => void
+  x?: () => void
 }
 
 function createDOMRef(dom: DocumentFragment): DOMRef {
@@ -358,38 +243,20 @@ function appendDOMRef(ref: DOMRef, target: ParentNode) {
   }
 }
 
-function moveDOMRefAfter(ref: DOMRef, anchor: ChildNode) {
+function moveDOMRef(ref: DOMRef, anchor: ChildNode, after?: boolean) {
   const parent = anchor.parentNode
   let node = ref.f
   if (!parent || !node) return
   const last = ref.l
+  const target = after ? anchor.nextSibling : anchor
   if (node === last) {
-    anchor.after(node)
-    return
-  }
-  const nextSibling = anchor.nextSibling
-  while (node) {
-    const next: ChildNode | null =
-      node === last ? null : (node.nextSibling as ChildNode | null)
-    parent.insertBefore(node, nextSibling)
-    if (!next) break
-    node = next
-  }
-}
-
-function moveDOMRefBefore(ref: DOMRef, anchor: ChildNode) {
-  const parent = anchor.parentNode
-  let node = ref.f
-  if (!parent || !node) return
-  const last = ref.l
-  if (node === last) {
-    parent.insertBefore(node, anchor)
+    parent.insertBefore(node, target)
     return
   }
   while (node) {
     const next: ChildNode | null =
       node === last ? null : (node.nextSibling as ChildNode | null)
-    parent.insertBefore(node, anchor)
+    parent.insertBefore(node, target)
     if (!next) break
     node = next
   }
@@ -401,10 +268,10 @@ function replaceDOMRef(
   newNode: ChildNode | DocumentFragment
 ) {
   if (oldNode !== ref.f && oldNode !== ref.l) return
-  const first = isType(newNode, 11)
+  const first = newNode.nodeType === 11
     ? (newNode.firstChild as ChildNode | null)
     : (newNode as ChildNode)
-  const last = isType(newNode, 11)
+  const last = newNode.nodeType === 11
     ? (newNode.lastChild as ChildNode | null)
     : (newNode as ChildNode)
   if (oldNode === ref.f) ref.f = first
@@ -434,43 +301,30 @@ function removeDOMRef(ref: DOMRef) {
  * @param  {any[]} ...expressions
  * @returns ArrowTemplate
  */
-export function html(id: string, ...expSlots: ArrowExpression[]): ArrowTemplate
 export function html(
   strings: TemplateStringsArray | string[],
   ...expSlots: ArrowExpression[]
 ): ArrowTemplate
 export function html(
-  strings: TemplateStringsArray | string[] | string,
+  strings: TemplateStringsArray | string[],
   ...expSlots: ArrowExpression[]
 ): ArrowTemplate {
   let chunk: Chunk | undefined
-  let memoId: string | null = null
-  const poolKey =
-    typeof strings === 'string' ? strings : strings.join(delimiterComment)
   let expressionPointer = storeExpressions(expSlots)
-  if (!Array.isArray(strings)) {
-    memoId = strings as string
-    strings = []
-  }
 
   function getExpressionPointer() {
     return expressionPointer < 0
-      ? (expressionPointer = storeExpressions(expSlots))
+      ? (template._e = expressionPointer = storeExpressions(expSlots))
       : expressionPointer
   }
 
   function getChunk() {
     if (!chunk) {
       chunk = createChunk(
-        strings as string[],
-        memoId,
-        expSlots.length > 0
+        strings as string[]
       ) as unknown as Chunk
       chunk._t = template
       chunk.k = template._k
-      chunk.m = template._m
-      chunk.p = template._p
-      ;(chunk as InternalChunk)[shapeKey] = template[shapeKey]
     }
     return chunk
   }
@@ -494,89 +348,23 @@ export function html(
   // its own content
   template.isT = true
   template._c = getChunk
+  template._e = expressionPointer
   template.key = (key: ArrowTemplateKey): ArrowTemplate => {
     template._k = key
     return template
   }
-  template.memo = (key: ArrowMemoKey): ArrowTemplate => {
-    template._m = key
-    if (template._p === undefined) template._p = template[shapeKey]
-    if (chunk) {
-      chunk.m = key
-      chunk.p = template._p
-    }
-    return template
-  }
-  template.update = (...newExpSlots: ArrowExpression[]): ArrowTemplate => {
-    replaceExpressions(getExpressionPointer(), newExpSlots)
-    return template
-  }
-  template.pool = (): ArrowTemplate => {
-    template._p = memoId ?? poolKey
-    if (chunk) {
-      chunk.p = template._p
-      return template
-    }
-    const pooled = takePooledChunk(template._p)
-    if (!pooled) return template
-    const pooledPointer = pooled._t._e
-    updateExpressions(getExpressionPointer(), pooledPointer)
-    template[releaseTemplateExpressions]()
-    ;(pooled._t as InternalTemplate)[orphanTemplateState]()
-    template[adoptTemplateState](pooled, pooledPointer)
-    pooled._t = template
-    pooled.k = template._k
-    pooled.m = template._m
-    pooled.p = template._p
-    return template
-  }
-  template.recycle = (): ArrowTemplate => {
-    if (!chunk || !hasMounted) return template
-    if (poolChunk(chunk)) return template
-    if (chunk.u) {
-      for (let i = 0; i < chunk.u.length; i++) chunk.u[i]()
-      chunk.u = null
-    }
-    removeDOMRef(chunk.ref)
-    if (chunk.a) {
-      chunk.a.abort()
-      chunk.a = null
-    }
-    template[disposeTemplateState]()
-    return template
-  }
-  template.id = (id: string): ArrowTemplate => {
-    memoId = id
-    if (template._p) template._p = id
-    chunk && template._p && (chunk.p = template._p)
-    return template
-  }
-  template[releaseTemplateExpressions] = () => {
-    if (expressionPointer > -1) {
+  template.x = () => {
+    if (expressionPointer + 1) {
       releaseExpressions(expressionPointer)
+      template._e = -1
       expressionPointer = -1
     }
   }
-  template[disposeTemplateState] = () => {
+  template.d = () => {
     hasMounted = false
     chunk = undefined
-    template[releaseTemplateExpressions]()
+    template.x?.()
   }
-  template[adoptTemplateState] = (nextChunk: Chunk, nextPointer: number) => {
-    chunk = nextChunk
-    expressionPointer = nextPointer
-    hasMounted = true
-  }
-  template[orphanTemplateState] = () => {
-    hasMounted = false
-    chunk = undefined
-    expressionPointer = -1
-  }
-  template[shapeKey] = memoId ?? poolKey
-  Object.defineProperty(template, '_e', {
-    configurable: true,
-    get: getExpressionPointer,
-  })
   return template
 }
 
@@ -592,25 +380,19 @@ function createBindings(
 ): ArrowFragment {
   const totalPaths = expressionPool[expressionPointer] as number
   const stackStart = bindingStackPos + 1
-  const prevPath: Array<string | number> = []
-  const prevNodes: Node[] = [chunk.dom]
   for (let i = 0; i < totalPaths; i++) {
     const path = chunk.paths[i]
-    const pathLen = path.length - 1
-    const max = prevPath.length < pathLen ? prevPath.length : pathLen
-    let depth = 0
-    while (depth < max && prevPath[depth] === path[depth]) depth++
-    let node = prevNodes[depth]
-    for (; depth < pathLen; depth++) {
-      node = node.childNodes.item(path[depth] as number)
-      prevNodes[depth + 1] = node
-      prevPath[depth] = path[depth]
+    const len = path.length
+    let node: Node = chunk.dom
+    for (let i = 0; i < len; i++) {
+      const segment = path[i]
+      if (typeof segment === 'number')
+        node = node.childNodes.item(segment as number)
+      if (i === len - 1) {
+        bindingStack[++bindingStackPos] = node
+        bindingStack[++bindingStackPos] = segment
+      }
     }
-    prevPath.length = pathLen
-    const segment = path[pathLen]
-    bindingStack[++bindingStackPos] =
-      typeof segment === 'number' ? node.childNodes.item(segment) : node
-    bindingStack[++bindingStackPos] = segment
   }
   const stackEnd = bindingStackPos
   for (let s = stackStart, e = expressionPointer + 1; s < stackEnd; s++, e++) {
@@ -645,94 +427,20 @@ function createNodeBinding(
     // We are dealing with a template that is not reactive. Render it.
     fragment = createRenderFn()(expression)!
   } else if (typeof expression === 'function') {
-    // Nested scalar bindings are common and can patch text/comment nodes
-    // directly without paying for the generic list/template renderer.
-    const render =
-      node.parentNode && node.parentNode !== parentChunk.dom
-        ? createScalarRenderFn(node)
-        : createRenderFn()
-    const [frag, stop] = watch(expressionPointer, render)
+    const [frag, stop] = watch(expressionPointer, createRenderFn())
     addCleanup(parentChunk, stop)
     fragment = frag!
   } else {
     fragment = isEmpty(expression)
       ? document.createComment('')
       : document.createTextNode(expression as string)
-    bindExpressionText(expressionPointer, fragment)
+    onExpressionUpdate(
+      expressionPointer,
+      (value: string) => (fragment.nodeValue = value)
+    )
   }
   updateChunkRef(parentChunk, node, fragment)
   node.parentNode?.replaceChild(fragment, node)
-}
-
-function createScalarRenderFn(
-  anchor: ChildNode
-): (renderable: ArrowRenderable) => DocumentFragment | Text | Comment | void {
-  let current: ChildNode = anchor
-  let render:
-    | ((renderable: ArrowRenderable) => DocumentFragment | Text | Comment | void)
-    | null = null
-  return function renderScalar(renderable: ArrowRenderable) {
-    if (render) return render(renderable)
-    if (isTpl(renderable) || Array.isArray(renderable)) {
-      const fragment = (render = createRenderFn())(renderable)
-      current.parentNode?.replaceChild(fragment!, current)
-      return fragment
-    }
-    if (isEmpty(renderable)) {
-      if (current.nodeType === 8) {
-        if (current.nodeValue) current.nodeValue = ''
-      } else {
-        const previous = current
-        current = document.createComment('')
-        previous.parentNode?.replaceChild(current, previous)
-      }
-      return current as Comment
-    }
-    if (current.nodeType === 3) {
-      if ((current as Text).data != renderable)
-        (current as Text).data = renderable as string
-      return current as Text
-    }
-    const previous = current
-    current = document.createTextNode(renderable as string)
-    previous.parentNode?.replaceChild(current, previous)
-    return current as Text
-  }
-}
-
-function dispatchDelegatedEvent(this: EventTarget, evt: Event) {
-  if ((evt as Event & { [delegatedEventMark]?: 1 })[delegatedEventMark]) return
-  ;(evt as Event & { [delegatedEventMark]?: 1 })[delegatedEventMark] = 1
-  const attrName = `@${evt.type}`
-  const root = this as Node | null
-  let node = evt.target as Node | null
-  while (node) {
-    const pointer = (node as unknown as Record<string, number | undefined>)[
-      attrName
-    ]
-    if (pointer !== undefined) {
-      ;(expressionPool[pointer] as CallableFunction)?.(evt)
-      if (evt.cancelBubble) return
-    }
-    if (node === root) return
-    node = node.parentNode
-  }
-}
-
-function delegateEvent(event: string, parentChunk: Chunk) {
-  if (!(event in delegateableEvents)) return false
-  const root = parentChunk.ref.f
-  if (!root || !isType(root, 1)) return false
-  let events = delegatedEvents.get(root)
-  if (!events) {
-    events = {}
-    delegatedEvents.set(root, events)
-  }
-  if (!events[event]) {
-    root.addEventListener(event, dispatchDelegatedEvent)
-    events[event] = 1
-  }
-  return true
 }
 
 /**
@@ -746,34 +454,26 @@ function createAttrBinding(
   expressionPointer: number,
   parentChunk: Chunk
 ) {
-  if (!isType(node, 1)) return
+  if (node.nodeType !== 1) return
+  const el = node as Element
   const expression = expressionPool[expressionPointer]
   if (attrName[0] === '@') {
-    const event = attrName.substring(1)
-    ;(node as Element & Record<string, number>)[attrName] = expressionPointer
-    if (!delegateEvent(event, parentChunk)) {
-      const handler =
-        eventHandlers[attrName] ??
-        (eventHandlers[attrName] = function (this: EventTarget, evt: Event) {
-          ;(
-            expressionPool[
-              (this as EventTarget & Record<string, number>)[attrName]
-            ] as CallableFunction
-          )?.(evt)
-        })
-      if (!parentChunk.a) parentChunk.a = new AbortController()
-      node.addEventListener(event, handler, { signal: parentChunk.a.signal })
-    }
-    node.removeAttribute(attrName)
+    el.addEventListener(
+      attrName.slice(1),
+      (evt) => (expressionPool[expressionPointer] as CallableFunction)?.(evt),
+    )
+    el.removeAttribute(attrName)
   } else if (typeof expression === 'function' && !isTpl(expression)) {
     // We are dealing with a reactive expression so perform watch binding.
     const [, stop] = watch(expressionPointer, (value) =>
-      setAttr(node, attrName, value as string)
+      setAttr(el, attrName, value as string)
     )
     addCleanup(parentChunk, stop)
   } else {
-    setAttr(node, attrName, expression as string | number | boolean | null)
-    bindExpressionAttr(expressionPointer, node as Element, attrName)
+    setAttr(el, attrName, expression as string | number | boolean | null)
+    onExpressionUpdate(expressionPointer, (value: string) =>
+      setAttr(el, attrName, value)
+    )
   }
 }
 
@@ -805,9 +505,6 @@ function createRenderFn(): (
   let previous: Chunk | Text | Comment | Rendered[]
   const keyedChunks: Record<Exclude<ArrowTemplateKey, undefined>, Chunk> = {}
   let updaterFrag: DocumentFragment | null = null
-  const listA: Rendered[] = []
-  const listB: Rendered[] = []
-  let renderCycle = 1
 
   return function render(
     renderable: ArrowRenderable
@@ -822,8 +519,8 @@ function createRenderFn(): (
         previous = renderable._c()
         return fragment
       } else if (Array.isArray(renderable)) {
-        const fragment = document.createDocumentFragment()
-        previous = renderList(renderable, listA, fragment)
+        let fragment: DocumentFragment
+        ;[fragment, previous] = renderList(renderable)
         return fragment
       } else if (isEmpty(renderable)) {
         return (previous = document.createComment(''))
@@ -837,41 +534,21 @@ function createRenderFn(): (
       if (Array.isArray(renderable)) {
         if (!Array.isArray(previous)) {
           // Rendering a list where previously there was not a list.
-          const fragment = document.createDocumentFragment()
-          const newList = renderList(renderable, listA, fragment)
+          const [fragment, newList] = renderList(renderable)
           getLastNode(previous).after(fragment)
           forgetChunk(previous)
           unmount(previous)
           previous = newList
         } else {
           // Patching a list.
-          const previousList = previous
-          const renderedList = previousList === listA ? listB : listA
           let i = 0
           const renderableLength = renderable.length
-          const previousLength = previousList.length
+          const previousLength = previous.length
           let anchor: ChildNode | undefined
-          const cycle = renderCycle++
-          renderedList.length = renderableLength || 1
+          const renderedList: Rendered[] = []
+          const previousToRemove = new Set(previous)
           if (renderableLength > previousLength) {
             updaterFrag ??= document.createDocumentFragment()
-          }
-          for (; i < previousLength; i++) markUnused(previousList[i], cycle)
-          i = 0
-          if (
-            renderableLength &&
-            previousLength >= renderableLength &&
-            tryKeyedReuse(renderable, previousList, renderedList)
-          ) {
-            for (i = 0; i < previousLength; i++) {
-              const stale = previousList[i]
-              if (isUnused(stale, cycle)) {
-                forgetChunk(stale)
-                unmount(stale)
-              }
-            }
-            previous = renderedList
-            return
           }
           // We need to re-render a list, to do this we loop over every item in
           // our *updated* list and patch those items against what previously
@@ -885,7 +562,7 @@ function createRenderFn(): (
             let item: string | number | boolean | ArrowTemplate = renderable[
               i
             ] as ArrowTemplate
-            const prev: Rendered | undefined = previousList[i]
+            const prev: Rendered | undefined = previous[i]
             let key: ArrowTemplateKey
             if (
               isTpl(item) &&
@@ -895,13 +572,8 @@ function createRenderFn(): (
               const keyedChunk = keyedChunks[key]
               // This is a keyed item, so update the expressions and then
               // used the keyed chunk instead.
-              if (item._m !== undefined && sameMemo(item._m, keyedChunk.m)) {
-                if (keyedChunk._t !== item) releaseTemplate(item)
-              } else {
-                updateExpressions(item._e, keyedChunk._t._e)
-                keyedChunk._t.memo(item._m)
-                if (keyedChunk._t !== item) releaseTemplate(item)
-              }
+              updateExpressions(item._e, keyedChunk._t._e)
+              if (keyedChunk._t !== item) (item as InternalTemplate).x?.()
               item = keyedChunk._t
             }
             if (i > previousLength - 1) {
@@ -911,22 +583,19 @@ function createRenderFn(): (
             const used = patch(item, prev, anchor) as Rendered
             anchor = getLastNode(used)
             renderedList[i] = used
-            clearUnused(used)
+            previousToRemove.delete(used)
           }
           if (!renderableLength) {
-            getLastNode(previousList[0]).after(
+            getLastNode(previous[0]).after(
               (renderedList[0] = document.createComment(''))
             )
           } else if (renderableLength > previousLength) {
             anchor?.after(updaterFrag!)
           }
-          for (i = 0; i < previousLength; i++) {
-            const stale = previousList[i]
-            if (isUnused(stale, cycle)) {
-              forgetChunk(stale)
-              unmount(stale)
-            }
-          }
+          previousToRemove.forEach((stale) => {
+            forgetChunk(stale)
+            unmount(stale)
+          })
           previous = renderedList
         }
       } else {
@@ -942,21 +611,19 @@ function createRenderFn(): (
    */
   function renderList(
     renderable: Array<string | number | boolean | ArrowTemplate>,
-    renderedItems: Rendered[],
-    fragment: DocumentFragment
-  ): Rendered[] {
+  ): [DocumentFragment, Rendered[]] {
+    const fragment = document.createDocumentFragment()
     if (renderable.length === 0) {
       const placeholder = document.createComment('')
       fragment.appendChild(placeholder)
-      renderedItems[0] = placeholder
-      renderedItems.length = 1
-      return renderedItems
+      return [fragment, [placeholder]]
     }
+    const renderedItems: Rendered[] = []
     renderedItems.length = renderable.length
     for (let i = 0; i < renderable.length; i++) {
       renderedItems[i] = mountItem(renderable[i], fragment)
     }
-    return renderedItems
+    return [fragment, renderedItems]
   }
 
   /**
@@ -982,49 +649,21 @@ function createRenderFn(): (
         (prev as Text).data = renderable as string
       return prev
     } else if (isTpl(renderable)) {
-      if (
-        renderable._k === undefined &&
-        isChunk(prev) &&
-        (prev as InternalChunk)[shapeKey] ===
-          (renderable as InternalTemplate)[shapeKey]
-      ) {
-        if (renderable._m !== undefined && sameMemo(renderable._m, prev.m)) {
-          if (renderable !== prev._t) releaseTemplate(renderable)
-          return prev
-        }
-        updateExpressions(renderable._e, prev._t._e)
-        prev._t.memo(renderable._m)
-        if (renderable !== prev._t) releaseTemplate(renderable)
-        return prev
-      }
-      if (
-        renderable._m !== undefined &&
-        isChunk(prev) &&
-        prev.k === renderable._k &&
-        (prev as InternalChunk)[shapeKey] ===
-          (renderable as InternalTemplate)[shapeKey] &&
-        sameMemo(renderable._m, prev.m)
-      ) {
-        if (renderable !== prev._t) releaseTemplate(renderable)
-        return prev
-      }
-
       const chunk = renderable._c()
       if (chunk.k !== undefined && chunk.k in keyedChunks) {
         const keyedChunk = keyedChunks[chunk.k]
         if (keyedChunk === prev) return prev
         if (anchor) {
-          moveDOMRefAfter(keyedChunk.ref, anchor)
+          moveDOMRef(keyedChunk.ref, anchor, true)
         } else {
-          moveDOMRefBefore(keyedChunk.ref, getFirstNode(prev))
+          moveDOMRef(keyedChunk.ref, getFirstNode(prev))
         }
         return keyedChunk
       } else if (isChunk(prev) && prev.$ === chunk.$) {
         // This is a template that has already been rendered, so we only need to
         // update the expressions
         updateExpressions(chunk._t._e, prev._t._e)
-        chunk.m !== undefined && prev._t.memo(chunk.m)
-        if (chunk._t !== prev._t) releaseTemplate(chunk._t)
+        if (chunk._t !== prev._t) (chunk._t as InternalTemplate).x?.()
         return prev
       }
 
@@ -1060,20 +699,6 @@ function createRenderFn(): (
     fragment: DocumentFragment
   ): Rendered {
     if (isTpl(item)) {
-      const pooled = takePooledChunk(item._p)
-      if (pooled) {
-        updateExpressions(item._e, pooled._t._e)
-        pooled._t._k = item._k
-        pooled._t._m = item._m
-        pooled._t._p = item._p
-        pooled.k = item._k
-        pooled.m = item._m
-        pooled.p = item._p
-        appendDOMRef(pooled.ref, fragment)
-        if (pooled._t !== item) releaseTemplate(item)
-        if (pooled.k !== undefined) keyedChunks[pooled.k] = pooled
-        return pooled
-      }
       fragment.appendChild(item())
       const chunk = item._c()
       if (chunk.k !== undefined) keyedChunks[chunk.k] = chunk
@@ -1086,57 +711,10 @@ function createRenderFn(): (
     return node
   }
 
-  function reuseKeyed(item: ArrowTemplate, keyedChunk: Chunk): Chunk {
-    if (item._m !== undefined && sameMemo(item._m, keyedChunk.m)) {
-      if (keyedChunk._t !== item) releaseTemplate(item)
-    } else {
-      updateExpressions(item._e, keyedChunk._t._e)
-      keyedChunk._t.memo(item._m)
-      if (keyedChunk._t !== item) releaseTemplate(item)
-    }
-    return keyedChunk
-  }
-
-  function tryKeyedReuse(
-    renderable: Array<string | number | boolean | ArrowTemplate>,
-    previousList: Rendered[],
-    renderedList: Rendered[]
-  ) {
-    let previousIndex = 0
-    let skipsRemaining = previousList.length - renderable.length
-    for (let i = 0; i < renderable.length; i++) {
-      const item = renderable[i]
-      if (!isTpl(item) || item._k === undefined) return false
-      let prev = previousList[previousIndex]
-      if (!isChunk(prev) || prev.k === undefined) return false
-      while (prev.k !== item._k) {
-        if (!skipsRemaining--) return false
-        prev = previousList[++previousIndex]
-        if (!isChunk(prev) || prev.k === undefined) return false
-      }
-      renderedList[i] = reuseKeyed(item, prev)
-      clearUnused(prev)
-      previousIndex++
-    }
-    return true
-  }
-
   function forgetChunk(item: Chunk | Text | Comment | Rendered[] | undefined) {
     if (isChunk(item) && item.k !== undefined && keyedChunks[item.k] === item) {
       delete keyedChunks[item.k]
     }
-  }
-
-  function markUnused(item: Rendered, cycle: number) {
-    ;(item as Rendered & { [renderMark]?: number })[renderMark] = cycle
-  }
-
-  function clearUnused(item: Rendered) {
-    ;(item as Rendered & { [renderMark]?: number })[renderMark] = 0
-  }
-
-  function isUnused(item: Rendered, cycle: number) {
-    return (item as Rendered & { [renderMark]?: number })[renderMark] === cycle
   }
 }
 
@@ -1156,17 +734,12 @@ const queueUnmount = queue(() => {
       | Array<Chunk | Text | ChildNode>
   ) => {
     if (isChunk(chunk)) {
-      if (poolChunk(chunk)) return
       if (chunk.u) {
         for (let i = 0; i < chunk.u.length; i++) chunk.u[i]()
         chunk.u = null
       }
       removeDOMRef(chunk.ref)
-      if (chunk.a) {
-        chunk.a.abort()
-        chunk.a = null
-      }
-      ;(chunk._t as InternalTemplate)[disposeTemplateState]?.()
+      ;(chunk._t as InternalTemplate).d?.()
     } else if (Array.isArray(chunk)) {
       for (let i = 0; i < chunk.length; i++) removeItems(chunk[i])
     } else {
@@ -1241,21 +814,16 @@ function getFirstNode(
  * @returns
  */
 function initChunk(
-  html: string,
-  id?: string | null,
-  hasExpressions = false
+  html: string
 ): PartialChunk {
   const tpl = document.createElement('template')
   tpl.innerHTML = html
-  if (hasExpressions) tpl.content.normalize()
-  return (chunkMemo[id ?? html] = {
+  return (chunkMemo[html] = {
     dom: tpl.content,
-    paths: hasExpressions ? createPaths(tpl.content) : [],
+    paths: createPaths(tpl.content),
     $: Symbol(),
     _t: () => null,
     k: null,
-    a: null,
-    m: null,
     ref: null,
     u: null,
   })
@@ -1268,14 +836,10 @@ function initChunk(
  * @returns
  */
 export function createChunk(
-  rawStrings: TemplateStringsArray | string[],
-  id?: string | null,
-  hasExpressions = true
+  rawStrings: TemplateStringsArray | string[]
 ): Omit<PartialChunk, 'ref'> & { ref: DOMRef } {
-  const memoKey = id ?? rawStrings.join(delimiterComment)
-  const chunk: PartialChunk =
-    chunkMemo[memoKey] ??
-    initChunk(id ? rawStrings.join(delimiterComment) : memoKey, id, hasExpressions)
+  const memoKey = rawStrings.join(delimiterComment)
+  const chunk: PartialChunk = chunkMemo[memoKey] ?? initChunk(memoKey)
   const dom = chunk.dom.cloneNode(true) as DocumentFragment
   const instance = Object.create(chunk) as Omit<PartialChunk, 'ref'> & {
     ref: DOMRef

@@ -475,6 +475,9 @@ const freeViews = []
 const slotIds = []
 const slotLabels = []
 const slotSelected = []
+const rowTemplate = document.createElement('template')
+rowTemplate.innerHTML =
+  '<tr><td class="col-md-1"></td><td class="col-md-4"><a data-action="select"></a></td><td class="col-md-1"><a data-action="remove"><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></a></td><td class="col-md-6"></td></tr>'
 
 function createLabel() {
   return (
@@ -504,37 +507,29 @@ function findIndexById(id) {
   return -1
 }
 
-function eventRowId(evt) {
-  const row = evt.currentTarget.closest('tr')
+function eventRowId(row) {
   return row ? +row.firstChild.textContent : -1
 }
 
-function handleSelect(evt) {
-  select(eventRowId(evt))
-}
-
-function handleRemove(evt) {
-  remove(eventRowId(evt))
-}
-
 function createView(row, index) {
-  const isSelected = row.id === selected
   const view = freeViews.pop()
   if (!view) {
-    slotIds[index] = row.id
-    slotLabels[index] = row.label
-    slotSelected[index] = isSelected
-    return html(
-      'row',
-      isSelected ? 'danger' : false,
-      row.id,
-      handleSelect,
-      row.label,
-      handleRemove
+    const el = rowTemplate.content.firstChild.cloneNode(true)
+    const id = el.firstChild.appendChild(document.createTextNode(''))
+    const label = el.firstChild.nextSibling.firstChild.appendChild(
+      document.createTextNode('')
+    )
+    return patchView(
+      {
+        el,
+        id,
+        label,
+      },
+      row,
+      index
     )
   }
-  patchView(view, row, index)
-  return view
+  return patchView(view, row, index)
 }
 
 function patchView(view, row, index) {
@@ -549,13 +544,10 @@ function patchView(view, row, index) {
   slotIds[index] = row.id
   slotLabels[index] = row.label
   slotSelected[index] = isSelected
-  view.update(
-    isSelected ? 'danger' : false,
-    row.id,
-    handleSelect,
-    row.label,
-    handleRemove
-  )
+  view.el.className = isSelected ? 'danger' : ''
+  view.id.data = '' + row.id
+  view.label.data = row.label
+  return view
 }
 
 function syncViews(start = 0) {
@@ -644,8 +636,6 @@ function select(id) {
   if (next > -1) patchView(views[next], rows[next], next)
 }
 
-html\`<tr class="\${null}"><td class="col-md-1">\${null}</td><td class="col-md-4"><a @click="\${null}">\${null}</a></td><td class="col-md-1"><a @click="\${null}"><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></a></td><td class="col-md-6"></td></tr>\`.id('row')()
-
 html\`<div class="container">
   <div class="jumbotron">
     <div class="row">
@@ -694,6 +684,14 @@ html\`<div class="container">
 </div>\`(document.getElementById('arrow'))
 
 const tbody = document.getElementById('rows')
+tbody.addEventListener('click', (evt) => {
+  const link = evt.target.closest('a')
+  if (!link) return
+  const row = link.closest('tr')
+  const id = eventRowId(row)
+  if (id < 0) return
+  link.dataset.action === 'remove' ? remove(id) : select(id)
+})
 
 function batchDOM(work) {
   const parent = tbody.parentNode
@@ -710,7 +708,7 @@ function batchDOM(work) {
 function mountViews(start) {
   const fragment = document.createDocumentFragment()
   for (let i = start; i < views.length; i++) {
-    fragment.appendChild(views[i]())
+    fragment.appendChild(views[i].el)
   }
   tbody.appendChild(fragment)
 }
