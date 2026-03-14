@@ -62,12 +62,14 @@ let monaco
 let editor
 let updateTimer = 0
 let hashTimer = 0
+let highlightTimer = 0
 let previewFrame
 let pendingModules = null
 let applyingHash = false
 let lastHash = ''
 let compileId = 0
 let previewReady = false
+let htmlDecorations
 
 const models = new Map()
 const viewStates = new Map()
@@ -78,7 +80,10 @@ const encodeText = (text) => {
   bytes.forEach((value) => {
     binary += String.fromCharCode(value)
   })
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
 }
 
 const decodeText = (value) => {
@@ -174,14 +179,18 @@ const scheduleHashSync = () => {
 
 const updateEditorTheme = () => {
   if (!monaco) return
-  monaco.editor.setTheme('vs')
+  monaco.editor.setTheme(
+    document.documentElement.dataset.theme === 'dark' ? 'vs-dark' : 'vs'
+  )
+  scheduleHtmlHighlight()
 }
 
 const flattenMessage = (message) => {
   if (typeof message === 'string') return message
-  return [message.messageText, ...(message.next || []).map(flattenMessage)].join(
-    '\n'
-  )
+  return [
+    message.messageText,
+    ...(message.next || []).map(flattenMessage),
+  ].join('\n')
 }
 
 const createMarker = (model, diagnostic) => {
@@ -268,6 +277,269 @@ const scheduleCompile = () => {
   }, 140)
 }
 
+const skipString = (source, index, quote) => {
+  for (let i = index + 1; i < source.length; i++) {
+    if (source[i] === '\\') {
+      i++
+      continue
+    }
+    if (source[i] === quote) return i + 1
+  }
+  return source.length
+}
+
+const skipLineComment = (source, index) => {
+  const next = source.indexOf('\n', index + 2)
+  return next === -1 ? source.length : next
+}
+
+const skipBlockComment = (source, index) => {
+  const next = source.indexOf('*/', index + 2)
+  return next === -1 ? source.length : next + 2
+}
+
+const skipTemplateLiteral = (source, index) => {
+  for (let i = index + 1; i < source.length; i++) {
+    if (source[i] === '\\') {
+      i++
+      continue
+    }
+    if (source[i] === '`') return i + 1
+    if (source[i] === '$' && source[i + 1] === '{') {
+      i = skipJsExpression(source, i + 2) - 1
+    }
+  }
+  return source.length
+}
+
+const skipJsExpression = (source, index, regions) => {
+  let depth = 0
+  for (let i = index; i < source.length; i++) {
+    const char = source[i]
+    const tagLength = templateTagLength(source, i)
+
+    if (tagLength) {
+      i = scanTaggedTemplate(source, i + tagLength, regions) - 1
+      continue
+    }
+    if (char === "'" || char === '"') {
+      i = skipString(source, i, char) - 1
+      continue
+    }
+    if (char === '`') {
+      i = skipTemplateLiteral(source, i) - 1
+      continue
+    }
+    if (char === '/' && source[i + 1] === '/') {
+      i = skipLineComment(source, i) - 1
+      continue
+    }
+    if (char === '/' && source[i + 1] === '*') {
+      i = skipBlockComment(source, i) - 1
+      continue
+    }
+    if (char === '{') {
+      depth++
+      continue
+    }
+    if (char === '}') {
+      if (!depth) return i + 1
+      depth--
+    }
+  }
+  return source.length
+}
+
+const templateTagLength = (source, index) => {
+  if (!source.startsWith('html`', index) && !source.startsWith('t`', index)) {
+    return 0
+  }
+  const prev = source[index - 1]
+  return prev && /[\w$.]/.test(prev) ? 0 : source[index] === 'h' ? 5 : 2
+}
+
+const scanTaggedTemplate = (source, index, regions) => {
+  let segmentStart = index
+  for (let i = index; i < source.length; i++) {
+    if (source[i] === '$' && source[i + 1] === '{') {
+      if (segmentStart < i) regions.push([segmentStart, i])
+      i = skipJsExpression(source, i + 2, regions) - 1
+      segmentStart = i + 1
+      continue
+    }
+    if (source[i] === '`') {
+      if (segmentStart < i) regions.push([segmentStart, i])
+      return i + 1
+    }
+  }
+  if (segmentStart < source.length) regions.push([segmentStart, source.length])
+  return source.length
+}
+
+const collectHtmlTemplateRegions = (source) => {
+  const regions = []
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i]
+    const tagLength = templateTagLength(source, i)
+    if (tagLength) {
+      i = scanTaggedTemplate(source, i + tagLength, regions) - 1
+      continue
+    }
+    if (char === "'" || char === '"') {
+      i = skipString(source, i, char) - 1
+      continue
+    }
+    if (char === '`') {
+      i = skipTemplateLiteral(source, i) - 1
+      continue
+    }
+    if (char === '/' && source[i + 1] === '/') {
+      i = skipLineComment(source, i) - 1
+      continue
+    }
+    if (char === '/' && source[i + 1] === '*') {
+      i = skipBlockComment(source, i) - 1
+    }
+  }
+  return regions
+}
+
+const tokenizeHtmlSegment = (segment) => {
+  const tokens = []
+  const push = (start, end, className) => {
+    if (end > start) tokens.push([start, end, className])
+  }
+
+  let i = 0
+  while (i < segment.length) {
+    if (segment.startsWith('<!--', i)) {
+      const end = segment.indexOf('-->', i + 4)
+      const next = end === -1 ? segment.length : end + 3
+      push(i, next, 'play-html-comment')
+      i = next
+      continue
+    }
+
+    if (segment[i] !== '<') {
+      i++
+      continue
+    }
+
+    const next = segment[i + 1]
+    if (!next || /[\s=]/.test(next)) {
+      i++
+      continue
+    }
+
+    let cursor = i
+    if (segment.startsWith('</', cursor)) {
+      push(cursor, cursor + 2, 'play-html-delimiter')
+      cursor += 2
+    } else {
+      push(cursor, cursor + 1, 'play-html-delimiter')
+      cursor++
+    }
+
+    const nameStart = cursor
+    while (cursor < segment.length && /[A-Za-z0-9:_-]/.test(segment[cursor]))
+      cursor++
+    push(nameStart, cursor, 'play-html-tag')
+
+    while (cursor < segment.length) {
+      while (cursor < segment.length && /\s/.test(segment[cursor])) cursor++
+
+      if (segment.startsWith('/>', cursor)) {
+        push(cursor, cursor + 2, 'play-html-delimiter')
+        cursor += 2
+        break
+      }
+      if (segment[cursor] === '>') {
+        push(cursor, cursor + 1, 'play-html-delimiter')
+        cursor++
+        break
+      }
+
+      const attrStart = cursor
+      while (cursor < segment.length && !/[\s=>/]/.test(segment[cursor])) {
+        cursor++
+      }
+      push(attrStart, cursor, 'play-html-attr-name')
+
+      while (cursor < segment.length && /\s/.test(segment[cursor])) cursor++
+      if (segment[cursor] !== '=') continue
+
+      cursor++
+      while (cursor < segment.length && /\s/.test(segment[cursor])) cursor++
+      const valueStart = cursor
+      const quote = segment[cursor]
+
+      if (quote === '"' || quote === "'") {
+        cursor++
+        while (cursor < segment.length) {
+          if (segment[cursor] === '\\') {
+            cursor += 2
+            continue
+          }
+          if (segment[cursor] === quote) {
+            cursor++
+            break
+          }
+          cursor++
+        }
+      } else {
+        while (cursor < segment.length && !/[\s>]/.test(segment[cursor]))
+          cursor++
+      }
+      push(valueStart, cursor, 'play-html-attr-value')
+    }
+
+    i = cursor
+  }
+
+  return tokens
+}
+
+const buildHtmlDecorations = (model) => {
+  const source = model.getValue()
+  const regions = collectHtmlTemplateRegions(source)
+  const decorations = []
+
+  for (const [startOffset, endOffset] of regions) {
+    const segment = source.slice(startOffset, endOffset)
+    for (const [localStart, localEnd, className] of tokenizeHtmlSegment(
+      segment
+    )) {
+      const start = startOffset + localStart
+      const end = startOffset + localEnd
+      decorations.push({
+        options: {
+          inlineClassName: className,
+        },
+        range: new monaco.Range(
+          model.getPositionAt(start).lineNumber,
+          model.getPositionAt(start).column,
+          model.getPositionAt(end).lineNumber,
+          model.getPositionAt(end).column
+        ),
+      })
+    }
+  }
+
+  return decorations
+}
+
+const applyHtmlHighlight = () => {
+  if (!editor || !monaco || !htmlDecorations) return
+  const model = editor.getModel()
+  if (!model) return
+  htmlDecorations.set(buildHtmlDecorations(model))
+}
+
+const scheduleHtmlHighlight = () => {
+  clearTimeout(highlightTimer)
+  highlightTimer = window.setTimeout(applyHtmlHighlight, 30)
+}
+
 const switchFile = (name) => {
   if (!editor || name === state.activeFile) return
 
@@ -277,6 +549,7 @@ const switchFile = (name) => {
   const viewState = viewStates.get(name)
   if (viewState) editor.restoreViewState(viewState)
   editor.focus()
+  scheduleHtmlHighlight()
   scheduleHashSync()
 }
 
@@ -314,6 +587,7 @@ const restoreSnapshot = (snapshot) => {
     editor.setModel(models.get(state.activeFile))
     const viewState = viewStates.get(state.activeFile)
     if (viewState) editor.restoreViewState(viewState)
+    scheduleHtmlHighlight()
   }
 }
 
@@ -328,9 +602,10 @@ const copyUrl = async () => {
 
 const createFileTemplate = (name) => {
   const base = name.replace(/\.ts$/, '')
-  const exportName = base
-    .replace(/(^|[-_])(\w)/g, (_, __, char) => char.toUpperCase())
-    .replace(/[^A-Za-z0-9_$]/g, '') || 'Example'
+  const exportName =
+    base
+      .replace(/(^|[-_])(\w)/g, (_, __, char) => char.toUpperCase())
+      .replace(/[^A-Za-z0-9_$]/g, '') || 'Example'
 
   return `import { component, html } from '@arrow-js/core'
 
@@ -347,7 +622,8 @@ const commitRename = (file, newName) => {
   const isNew = !models.has(file.name)
 
   if (!isTsFileName(newName)) return isNew ? removeFile(file.name) : undefined
-  if (newName !== file.name && models.has(newName)) return isNew ? removeFile(file.name) : undefined
+  if (newName !== file.name && models.has(newName))
+    return isNew ? removeFile(file.name) : undefined
 
   if (isNew) {
     const model = monaco.editor.createModel(
@@ -372,7 +648,11 @@ const commitRename = (file, newName) => {
   models.delete(oldName)
   viewStates.delete(oldName)
 
-  const newModel = monaco.editor.createModel(code, 'typescript', modelUri(newName))
+  const newModel = monaco.editor.createModel(
+    code,
+    'typescript',
+    modelUri(newName)
+  )
   models.set(newName, newModel)
   file.name = newName
 
@@ -457,7 +737,11 @@ const loadMonaco = () => {
     script.src = `${MONACO_URL}/loader.js`
     script.onload = () => {
       window.require.config({ paths: { vs: MONACO_URL } })
-      window.require(['vs/editor/editor.main'], () => resolve(window.monaco), reject)
+      window.require(
+        ['vs/editor/editor.main'],
+        () => resolve(window.monaco),
+        reject
+      )
     }
     script.onerror = () => reject(new Error('Failed to load Monaco'))
     document.head.append(script)
@@ -502,13 +786,16 @@ const initMonaco = async () => {
     smoothScrolling: true,
     tabSize: 2,
   })
+  htmlDecorations = editor.createDecorationsCollection([])
 
   editor.onDidChangeModelContent(() => {
     if (applyingHash) return
+    scheduleHtmlHighlight()
     scheduleHashSync()
     scheduleCompile()
   })
 
+  scheduleHtmlHighlight()
   scheduleCompile()
 }
 
@@ -529,7 +816,11 @@ const shell = html`
       <aside class="play-explorer">
         <div class="play-explorer-header">
           <span class="play-explorer-title">Explorer</span>
-          <button class="play-icon-button" @click="${addFile}" aria-label="New file">
+          <button
+            class="play-icon-button"
+            @click="${addFile}"
+            aria-label="New file"
+          >
             +
           </button>
         </div>
@@ -539,8 +830,13 @@ const shell = html`
               (file) => html`<div
                 class="play-file"
                 data-active="${() => String(file.name === state.activeFile)}"
-                @click="${() => { if (state.renaming !== file.name) switchFile(file.name) }}"
-                @dblclick="${(e) => { e.preventDefault(); startRename(file.name) }}"
+                @click="${() => {
+                  if (state.renaming !== file.name) switchFile(file.name)
+                }}"
+                @dblclick="${(e) => {
+                  e.preventDefault()
+                  startRename(file.name)
+                }}"
               >
                 <span class="play-file-icon">TS</span>
                 ${() =>
@@ -551,13 +847,18 @@ const shell = html`
                         @blur="${(e) => commitRename(file, e.target.value)}"
                         @keydown="${(e) => {
                           if (e.key === 'Enter') e.target.blur()
-                          if (e.key === 'Escape') { state.renaming = ''; if (!models.has(file.name)) removeFile(file.name) }
+                          if (e.key === 'Escape') {
+                            state.renaming = ''
+                            if (!models.has(file.name)) removeFile(file.name)
+                          }
                         }}"
                       />`
                     : html`<span class="play-file-name">${file.name}</span>`}
                 ${() =>
                   file.errors && state.renaming !== file.name
-                    ? html`<span class="play-file-badge">${() => file.errors}</span>`
+                    ? html`<span class="play-file-badge"
+                        >${() => file.errors}</span
+                      >`
                     : ''}
               </div>`
             )}
