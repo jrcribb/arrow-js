@@ -50,6 +50,7 @@ export const Counter = component(() => {
 const state = reactive({
   activeFile: ENTRY_FILE,
   copied: false,
+  renaming: '',
   files: DEFAULT_FILES.map(([name]) => ({
     errors: 0,
     name,
@@ -173,9 +174,7 @@ const scheduleHashSync = () => {
 
 const updateEditorTheme = () => {
   if (!monaco) return
-  monaco.editor.setTheme(
-    document.documentElement.dataset.theme === 'dark' ? 'vs-dark' : 'vs'
-  )
+  monaco.editor.setTheme('vs')
 }
 
 const flattenMessage = (message) => {
@@ -340,31 +339,82 @@ export const ${exportName} = component(() =>
 )`
 }
 
-const addFile = () => {
-  const name = window.prompt('New TypeScript file name', 'Component.ts')?.trim()
-  if (!name) return
-  if (!isTsFileName(name)) {
-    window.alert('File names must be plain .ts files like Component.ts')
-    return
-  }
-  if (models.has(name)) {
-    window.alert('That file already exists.')
+const commitRename = (file, newName) => {
+  newName = newName.trim()
+  if (!newName.endsWith('.ts')) newName += '.ts'
+  state.renaming = ''
+
+  const isNew = !models.has(file.name)
+
+  if (!isTsFileName(newName)) return isNew ? removeFile(file.name) : undefined
+  if (newName !== file.name && models.has(newName)) return isNew ? removeFile(file.name) : undefined
+
+  if (isNew) {
+    const model = monaco.editor.createModel(
+      createFileTemplate(newName),
+      'typescript',
+      modelUri(newName)
+    )
+    models.set(newName, model)
+    file.name = newName
+    switchFile(newName)
+    scheduleHashSync()
+    scheduleCompile()
     return
   }
 
-  const model = monaco.editor.createModel(
-    createFileTemplate(name),
-    'typescript',
-    modelUri(name)
-  )
-  models.set(name, model)
-  state.files.push({
-    errors: 0,
-    name,
-  })
-  switchFile(name)
+  if (newName === file.name) return
+
+  const oldName = file.name
+  const code = models.get(oldName)?.getValue() ?? ''
+  const oldModel = models.get(oldName)
+  if (oldModel) oldModel.dispose()
+  models.delete(oldName)
+  viewStates.delete(oldName)
+
+  const newModel = monaco.editor.createModel(code, 'typescript', modelUri(newName))
+  models.set(newName, newModel)
+  file.name = newName
+
+  if (state.activeFile === oldName) {
+    state.activeFile = newName
+    editor.setModel(newModel)
+  }
   scheduleHashSync()
   scheduleCompile()
+}
+
+const removeFile = (name) => {
+  const idx = state.files.findIndex((f) => f.name === name)
+  if (idx === -1) return
+  state.files.splice(idx, 1)
+  const model = models.get(name)
+  if (model) model.dispose()
+  models.delete(name)
+  viewStates.delete(name)
+}
+
+const focusRenameInput = () => {
+  requestAnimationFrame(() => {
+    const el = document.querySelector('.play-rename-input')
+    if (!el) return
+    el.focus()
+    const dot = el.value.lastIndexOf('.')
+    if (dot > 0) el.setSelectionRange(0, dot)
+  })
+}
+
+const startRename = (name) => {
+  state.renaming = name
+  focusRenameInput()
+}
+
+const addFile = () => {
+  if (!monaco) return
+  const placeholder = 'Untitled.ts'
+  state.files.push({ errors: 0, name: placeholder })
+  state.renaming = placeholder
+  focusRenameInput()
 }
 
 const onFrameMessage = (event) => {
@@ -484,37 +534,48 @@ const shell = html`
           </button>
         </div>
         <div class="play-explorer-list">
-          <div class="play-tree">
-            <div class="play-folder">
-              <span class="play-caret">▾</span>
-              <span class="play-folder-name">src</span>
-            </div>
-            <div class="play-tree-children">
-              ${() =>
-                state.files.map(
-                  (file) => html`<button
-                    class="play-file"
-                    data-active="${() => String(file.name === state.activeFile)}"
-                    @click="${() => switchFile(file.name)}"
-                  >
-                    <span class="play-file-main">
-                      <span class="play-file-icon">TS</span>
-                      <span class="play-file-name">${file.name}</span>
-                    </span>
-                    ${() =>
-                      file.errors
-                        ? html`<span class="play-file-badge">${() => file.errors}</span>`
-                        : ''}
-                  </button>`
-                )}
-            </div>
-          </div>
+          ${() =>
+            state.files.map(
+              (file) => html`<div
+                class="play-file"
+                data-active="${() => String(file.name === state.activeFile)}"
+                @click="${() => { if (state.renaming !== file.name) switchFile(file.name) }}"
+                @dblclick="${(e) => { e.preventDefault(); startRename(file.name) }}"
+              >
+                <span class="play-file-icon">TS</span>
+                ${() =>
+                  state.renaming === file.name
+                    ? html`<input
+                        class="play-rename-input"
+                        value="${file.name}"
+                        @blur="${(e) => commitRename(file, e.target.value)}"
+                        @keydown="${(e) => {
+                          if (e.key === 'Enter') e.target.blur()
+                          if (e.key === 'Escape') { state.renaming = ''; if (!models.has(file.name)) removeFile(file.name) }
+                        }}"
+                      />`
+                    : html`<span class="play-file-name">${file.name}</span>`}
+                ${() =>
+                  file.errors && state.renaming !== file.name
+                    ? html`<span class="play-file-badge">${() => file.errors}</span>`
+                    : ''}
+              </div>`
+            )}
         </div>
       </aside>
       <section class="play-editor-pane">
+        <div class="play-pane-header">
+          <span class="play-pane-tab">
+            <span class="play-file-icon">TS</span>
+            ${() => state.activeFile}
+          </span>
+        </div>
         <div id="play-editor" class="play-editor"></div>
       </section>
       <section class="play-preview-pane">
+        <div class="play-pane-header">
+          <span class="play-pane-label">Preview</span>
+        </div>
         <iframe
           id="play-preview"
           class="play-preview"
