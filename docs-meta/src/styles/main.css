@@ -195,20 +195,19 @@ section[id] {
   background: none;
 }
 
-/* Twoslash: overflow — let popups escape the code block */
+/* Twoslash: code scrolls, popups escape via fixed positioning (JS) */
 .code-block[data-has-twoslash="true"] {
-  overflow: visible;
   position: relative;
   z-index: 1;
 }
 
-/* Elevate stacking context on hover so popup renders above later siblings */
 .code-block[data-has-twoslash="true"]:has(.twoslash-hover:hover) {
   z-index: 50;
 }
 
 .code-block[data-has-twoslash="true"] pre {
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: hidden;
   position: relative;
   z-index: 2;
 }
@@ -322,20 +321,16 @@ section[id] {
   border-top-color: #e4e4e7;
 }
 
-/* Hero code block — padding on wrapper so Shiki replacement keeps it */
+/* Hero code block */
 .hero-code pre {
   margin: 0;
   padding: 1.25rem;
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: hidden;
   position: relative;
-  z-index: 2;
   font-size: 0.8125rem;
   line-height: 1.7;
   background: transparent !important;
-}
-
-.hero-code:has(.twoslash-hover:hover) {
-  z-index: 50;
 }
 
 /* Inline code */
