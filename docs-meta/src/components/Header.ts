@@ -15,7 +15,8 @@ if (typeof window !== 'undefined') {
     .catch(() => {})
 }
 
-export function Header() {
+export function Header(url: string = '/') {
+  const isApi = url.replace(/\/+$/, '') === '/api'
   return html`
     <header
       class="fixed top-0 left-0 right-0 z-50 border-b border-zinc-200/60 dark:border-zinc-800/60 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl"
@@ -39,10 +40,19 @@ export function Header() {
 
         <nav class="flex items-center gap-1">
           <a
-            href="#what-is-arrow"
-            class="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors"
+            href="/"
+            class="header-nav-link"
+            data-active="${isApi ? false : ''}"
+            data-hide-mobile
           >
             Docs
+          </a>
+          <a
+            href="/api"
+            class="header-nav-link"
+            data-active="${isApi ? '' : false}"
+          >
+            API
           </a>
           <a
             href="https://github.com/justin-schroeder/arrow-js"
@@ -59,6 +69,7 @@ export function Header() {
           <a
             href="https://x.com/intent/follow?screen_name=jpschroeder"
             class="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors"
+            data-hide-sm
             target="_blank"
             rel="noopener"
             aria-label="Follow on X"
