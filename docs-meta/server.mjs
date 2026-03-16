@@ -6,42 +6,18 @@ import { createServer as createViteServer } from 'vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const isProduction = process.env.NODE_ENV === 'production'
-const port = Number(process.env.PORT ?? 4173)
-let vite = null
+const port = Number(process.env.PORT ?? 4174)
 
 const templatePath = path.resolve(__dirname, 'index.html')
 const clientDistPath = path.resolve(__dirname, 'dist/client')
 const serverEntryPath = path.resolve(__dirname, 'dist/server/entry-server.js')
-const playgroundRuntimePath = path.resolve(
-  __dirname,
-  '../packages/core/dist/index.mjs'
-)
-const htmlEntryRedirects = new Map([
-  ['/benchmarks', '/benchmarks/'],
-  ['/play', '/play/'],
-  ['/play/preview', '/play/preview.html'],
-  ['/play/preview/', '/play/preview.html'],
-])
-const devHtmlEntries = new Map([
-  ['/benchmarks/', path.resolve(__dirname, 'benchmarks/index.html')],
-  ['/benchmarks/index.html', path.resolve(__dirname, 'benchmarks/index.html')],
-  ['/play/', path.resolve(__dirname, 'play/index.html')],
-  ['/play/index.html', path.resolve(__dirname, 'play/index.html')],
-  ['/play/preview.html', path.resolve(__dirname, 'play/preview.html')],
-])
+
+let vite = null
 
 const server = http.createServer(async (request, response) => {
   const url = request.url ?? '/'
 
   try {
-    const redirectTarget = redirectHtmlEntryUrl(request)
-
-    if (redirectTarget) {
-      response.writeHead(302, { Location: redirectTarget })
-      response.end()
-      return
-    }
-
     if (vite) {
       await new Promise((resolve, reject) => {
         vite.middlewares(request, response, (error) => {
@@ -55,30 +31,14 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
-    const devHtmlEntry = !isProduction ? resolveDevHtmlEntry(url) : null
-
-    if (devHtmlEntry) {
-      const template = await fs.readFile(devHtmlEntry.filePath, 'utf8')
-      const html = await vite.transformIndexHtml(devHtmlEntry.url, template)
-
-      response.writeHead(200, {
-        'Content-Type': 'text/html',
-      })
-      response.end(html)
-      return
-    }
-
     const staticFile = await resolveStaticFile(url)
-
     if (staticFile) {
       await serveStaticAsset(staticFile, response)
       return
     }
 
     if (!isDocumentRequest(request)) {
-      response.writeHead(404, {
-        'Content-Type': 'text/plain',
-      })
+      response.writeHead(404, { 'Content-Type': 'text/plain' })
       response.end('Not found')
       return
     }
@@ -92,7 +52,9 @@ const server = http.createServer(async (request, response) => {
     } else {
       template = await fs.readFile(templatePath, 'utf8')
       template = await vite.transformIndexHtml(url, template)
-      ;({ renderPage } = await vite.ssrLoadModule('/src/entry-server.js'))
+      ;({ renderPage } = await vite.environments.ssr.runner.import(
+        '/src/entry-server.ts'
+      ))
     }
 
     const page = await renderPage(url)
@@ -101,18 +63,12 @@ const server = http.createServer(async (request, response) => {
       .replace('<!--app-html-->', page.html)
       .replace('<!--app-payload-->', page.payloadScript ?? '')
 
-    response.writeHead(page.status, {
+    response.writeHead(page.status ?? 200, {
       'Content-Type': 'text/html',
     })
     response.end(html)
   } catch (error) {
-    if (vite) {
-      vite.ssrFixStacktrace(error)
-    }
-
-    response.writeHead(500, {
-      'Content-Type': 'text/plain',
-    })
+    response.writeHead(500, { 'Content-Type': 'text/plain' })
     response.end(error instanceof Error ? error.stack ?? error.message : String(error))
   }
 })
@@ -120,6 +76,7 @@ const server = http.createServer(async (request, response) => {
 if (!isProduction) {
   vite = await createViteServer({
     root: __dirname,
+    configFile: path.resolve(__dirname, 'vite.config.ts'),
     appType: 'custom',
     server: {
       middlewareMode: true,
@@ -129,20 +86,18 @@ if (!isProduction) {
       },
     },
   })
+
+  await vite.environments.ssr.init()
 }
 
 server.listen(port, '127.0.0.1', () => {
-  console.log(`Arrow docs server running at http://127.0.0.1:${port}`)
+  console.log(`Arrow docs meta server running at http://127.0.0.1:${port}`)
 })
 
 async function resolveStaticFile(url) {
   const pathname = new URL(url, 'http://arrow.local').pathname
 
-  if (pathname === '/play/arrow-runtime.js') {
-    return playgroundRuntimePath
-  }
-
-  if (pathname === '/' || pathname === '/docs' || pathname === '/docs/') {
+  if (pathname === '/') {
     return null
   }
 
@@ -173,11 +128,9 @@ async function serveStaticAsset(filePath, response) {
 function contentTypeFor(filePath) {
   if (filePath.endsWith('.css')) return 'text/css'
   if (filePath.endsWith('.js')) return 'application/javascript'
-  if (filePath.endsWith('.mjs')) return 'application/javascript'
   if (filePath.endsWith('.html')) return 'text/html'
   if (filePath.endsWith('.svg')) return 'image/svg+xml'
   if (filePath.endsWith('.png')) return 'image/png'
-  if (filePath.endsWith('.gif')) return 'image/gif'
   if (filePath.endsWith('.ico')) return 'image/x-icon'
   return 'application/octet-stream'
 }
@@ -205,33 +158,4 @@ function isDocumentRequest(request) {
 
   const accept = request.headers.accept ?? ''
   return !accept || accept.includes('text/html') || accept.includes('*/*')
-}
-
-function redirectHtmlEntryUrl(request) {
-  if (!isDocumentRequest(request)) {
-    return null
-  }
-
-  const target = new URL(request.url ?? '/', 'http://arrow.local')
-  const redirectPath = htmlEntryRedirects.get(target.pathname)
-
-  if (!redirectPath) {
-    return null
-  }
-
-  return `${redirectPath}${target.search}`
-}
-
-function resolveDevHtmlEntry(url) {
-  const target = new URL(url, 'http://arrow.local')
-  const filePath = devHtmlEntries.get(target.pathname)
-
-  if (!filePath) {
-    return null
-  }
-
-  return {
-    filePath,
-    url: `${target.pathname}${target.search}`,
-  }
 }

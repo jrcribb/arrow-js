@@ -1,0 +1,24 @@
+{
+  "name": "@arrow-js/docs-meta",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "build": "vite build --app",
+    "preview": "NODE_ENV=production node server.mjs"
+  },
+  "dependencies": {
+    "@arrow-js/core": "workspace:*",
+    "@arrow-js/framework": "workspace:*",
+    "@arrow-js/hydrate": "workspace:*",
+    "@arrow-js/ssr": "workspace:*",
+    "@arrow-js/vite-plugin-arrow": "workspace:*",
+    "@shikijs/twoslash": "^4.0.2",
+    "shiki": "^4.0.2",
+    "twoslash-cdn": "^0.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "tailwindcss": "^4.2.1"
+  }
+}
