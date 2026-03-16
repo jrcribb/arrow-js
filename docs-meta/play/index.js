@@ -286,12 +286,21 @@ const scheduleHashSync = () => {
   hashTimer = window.setTimeout(writeHash, 420)
 }
 
+const sendThemeToPreview = () => {
+  if (!previewFrame?.contentWindow) return
+  previewFrame.contentWindow.postMessage(
+    { source: 'arrow-play-host', type: 'theme', theme: document.documentElement.dataset.theme || 'light' },
+    '*'
+  )
+}
+
 const updateEditorTheme = () => {
   if (!monaco) return
   monaco.editor.setTheme(
     document.documentElement.dataset.theme === 'dark' ? 'vs-dark' : 'vs'
   )
   scheduleHtmlHighlight()
+  sendThemeToPreview()
 }
 
 
@@ -898,6 +907,7 @@ const onFrameMessage = (event) => {
   if (!data || data.source !== 'arrow-play-preview') return
   if (data.type === 'frame-ready') {
     previewReady = true
+    sendThemeToPreview()
     if (pendingModules) runPreview(pendingModules)
   }
 }

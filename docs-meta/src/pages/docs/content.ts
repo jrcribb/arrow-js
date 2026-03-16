@@ -648,46 +648,46 @@ interface ExampleEntry {
 
 const examples: ExampleEntry[] = [
   {
-    id: 'calculator',
-    title: 'Calculator',
+    id: 'todo',
+    title: 'Todo List',
     description:
-      'A polished calculator split into display and keypad components.',
-    sourceUrl: `${examplesBaseUrl}/calculator`,
+      'A task tracker with reactive arrays, keyed lists, and computed filtering.',
+    sourceUrl: `${examplesBaseUrl}/todo`,
   },
   {
-    id: 'performance',
-    title: 'Performance',
+    id: 'timer',
+    title: 'Pomodoro Timer',
     description:
-      'A live data board with componentized rows and reactive throughput stats.',
-    sourceUrl: `${examplesBaseUrl}/performance`,
+      'A focus timer with SVG progress ring, intervals, and computed formatting.',
+    sourceUrl: `${examplesBaseUrl}/timer`,
   },
   {
-    id: 'component-stability',
-    title: 'Component Stability',
+    id: 'palette',
+    title: 'Color Palette',
     description:
-      'A nested state lab showing what survives parent rerenders and what resets on unmount.',
-    sourceUrl: `${examplesBaseUrl}/component-stability`,
+      'A Coolors-style harmony palette generator with reactive style binding and computed colors.',
+    sourceUrl: `${examplesBaseUrl}/palette`,
   },
   {
-    id: 'dropdowns',
-    title: 'Dropdowns',
+    id: 'password',
+    title: 'Password Generator',
     description:
-      'A small UI library example with reusable dropdown and card components.',
-    sourceUrl: `${examplesBaseUrl}/dropdowns`,
+      'A configurable password tool with reactive toggles and a strength meter.',
+    sourceUrl: `${examplesBaseUrl}/password`,
   },
   {
-    id: 'carousel',
-    title: 'Carousel',
+    id: 'accordion',
+    title: 'Accordion',
     description:
-      'A media carousel with thumbnail navigation and a details panel.',
-    sourceUrl: `${examplesBaseUrl}/carousel`,
+      'Expandable FAQ sections where each component instance keeps its own state.',
+    sourceUrl: `${examplesBaseUrl}/accordion`,
   },
   {
-    id: 'tabs',
-    title: 'Tabs',
+    id: 'feed',
+    title: 'Live Feed',
     description:
-      'A tabbed workspace composed from focused button and panel components.',
-    sourceUrl: `${examplesBaseUrl}/tabs`,
+      'An auto-updating event feed with reactive array mutations and timed entries.',
+    sourceUrl: `${examplesBaseUrl}/feed`,
   },
 ]
 
@@ -705,8 +705,7 @@ export function Examples() {
       </h2>
       <div class="space-y-4 text-zinc-600 dark:text-zinc-400 leading-relaxed">
         <p>
-          These examples open directly in the playground, including the
-          multi-file ones.
+          Each example runs in the playground with full source you can edit live.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
           ${examples.map(

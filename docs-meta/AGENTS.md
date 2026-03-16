@@ -28,7 +28,7 @@ docs-meta/
 Always import from the published package names, never from relative source paths:
 
 ```ts
-// Core runtime (~2KB) — always available on client AND server
+// Core runtime (~3KB) — always available on client AND server
 import { html, reactive, watch, component, pick, props } from '@arrow-js/core'
 import type { ArrowTemplate, Props, Reactive, Computed } from '@arrow-js/core'
 
