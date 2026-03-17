@@ -26,11 +26,67 @@ function collapseWhitespace(text: string): string {
   return text.replace(/[ \t]+/g, ' ').trim()
 }
 
+function stripBalancedDiv(html: string, className: string): string {
+  const open = `<div class="${className}">`
+  let idx = html.indexOf(open)
+  while (idx !== -1) {
+    let depth = 0
+    let i = idx
+    const divOpen = /<div[\s>]/g
+    const divClose = /<\/div>/g
+    const tag = /<\/?div[\s>]/g
+    tag.lastIndex = idx
+    let end = -1
+    while (true) {
+      const m = tag.exec(html)
+      if (!m) break
+      if (m[0].startsWith('</')) {
+        depth--
+        if (depth === 0) {
+          end = m.index + '</div>'.length
+          break
+        }
+      } else {
+        depth++
+      }
+    }
+    if (end === -1) break
+    html = html.slice(0, idx) + html.slice(end)
+    idx = html.indexOf(open)
+  }
+  return html
+}
+
 export function htmlToMarkdown(html: string): string {
   // Extract article content only
   const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/)
   if (!articleMatch) return ''
   let content = articleMatch[1]
+
+  // Strip interactive UI components that shouldn't appear in markdown
+  content = stripBalancedDiv(content, 'copy-menu')
+  content = content.replace(/<a[^>]*class="playground-cta"[^>]*>[\s\S]*?<\/a>/g, '')
+
+  // Convert example card grids into markdown-friendly lists
+  content = content.replace(
+    /<div class="grid[^"]*">[\s\S]*?<\/div>\s*<\/div>\s*<\/div>\s*<\/div>/g,
+    (grid) => {
+      const cards: string[] = []
+      const cardPattern =
+        /<h3[^>]*>([\s\S]*?)<\/h3>\s*<p[^>]*>([\s\S]*?)<\/p>[\s\S]*?<a\s+href="([^"]*)"[^>]*>\s*Open in Playground\s*<\/a>/g
+      let m: RegExpExecArray | null
+      while ((m = cardPattern.exec(grid)) !== null) {
+        const title = stripTags(m[1]).trim()
+        const desc = stripTags(m[2]).trim()
+        cards.push(
+          `<li><a href="${m[3]}">${title}</a> — ${desc}</li>`
+        )
+      }
+      return cards.length
+        ? `<ul>${cards.join('')}</ul>`
+        : ''
+    }
+  )
 
   const lines: string[] = []
 

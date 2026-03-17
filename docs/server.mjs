@@ -1,3 +1,4 @@
+import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
@@ -26,6 +27,7 @@ const htmlEntryRedirects = new Map([
 const textRoutes = new Map([
   ['/docs.md', { render: 'markdown', url: '/' }],
   ['/api.md', { render: 'markdown', url: '/api' }],
+  ['/play.md', { render: 'playground' }],
   ['/llms.txt', { render: 'llms' }],
 ])
 
@@ -48,6 +50,9 @@ const server = http.createServer(async (request, response) => {
       response.end()
       return
     }
+
+    const playApiResult = await handlePlayApi(url, request, response)
+    if (playApiResult) return
 
     const textRoute = resolveTextRoute(url)
     if (textRoute) {
@@ -143,6 +148,98 @@ if (!isProduction) {
 server.listen(port, '127.0.0.1', () => {
   console.log(`Arrow docs meta server running at http://127.0.0.1:${port}`)
 })
+
+/* ── Play API (dev-mode in-memory store, mirrors Cloudflare Worker) ── */
+
+const HASH_LENGTH = 32
+const playStore = new Map()
+const playStorePath = path.resolve(__dirname, '.play-store.json')
+
+async function loadPlayStore() {
+  try {
+    const data = await fs.readFile(playStorePath, 'utf8')
+    for (const [k, v] of Object.entries(JSON.parse(data))) {
+      playStore.set(k, v)
+    }
+  } catch {}
+}
+
+async function persistPlayStore() {
+  await fs.writeFile(
+    playStorePath,
+    JSON.stringify(Object.fromEntries(playStore), null, 2),
+  )
+}
+
+function contentHash(data) {
+  return crypto.createHash('sha256').update(data).digest('hex').slice(0, HASH_LENGTH)
+}
+
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    request.on('data', (chunk) => chunks.push(chunk))
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    request.on('error', reject)
+  })
+}
+
+async function handlePlayApi(url, request, response) {
+  const target = new URL(url, 'http://arrow.local')
+
+  if (request.method === 'OPTIONS' && target.pathname.startsWith('/api/play')) {
+    response.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    })
+    response.end()
+    return true
+  }
+
+  if (request.method === 'POST' && target.pathname === '/api/play') {
+    const body = JSON.parse(await readBody(request))
+    if (!body?.snapshot || typeof body.snapshot !== 'string') {
+      response.writeHead(400, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: 'Missing snapshot field' }))
+      return true
+    }
+
+    const id = contentHash(body.snapshot)
+    if (!playStore.has(id)) {
+      playStore.set(id, body.snapshot)
+      persistPlayStore().catch(() => {})
+    }
+
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    })
+    response.end(JSON.stringify({ id }))
+    return true
+  }
+
+  const loadMatch = target.pathname.match(/^\/api\/play\/([a-f0-9]+)$/)
+  if (request.method === 'GET' && loadMatch) {
+    const snapshot = playStore.get(loadMatch[1])
+    if (!snapshot) {
+      response.writeHead(404, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: 'Not found' }))
+      return true
+    }
+
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    })
+    response.end(JSON.stringify({ snapshot }))
+    return true
+  }
+
+  return false
+}
+
+loadPlayStore()
 
 async function resolveStaticFile(url) {
   const pathname = new URL(url, 'http://arrow.local').pathname
@@ -250,12 +347,12 @@ function resolveTextRoute(url) {
 }
 
 async function serveTextRoute(route, request, response) {
-  let renderMarkdown
+  let renderMarkdown, renderPlayground
 
   if (isProduction) {
-    ;({ renderMarkdown } = await import(pathToFileURL(serverEntryPath).href))
+    ;({ renderMarkdown, renderPlayground } = await import(pathToFileURL(serverEntryPath).href))
   } else {
-    ;({ renderMarkdown } = await vite.environments.ssr.runner.import(
+    ;({ renderMarkdown, renderPlayground } = await vite.environments.ssr.runner.import(
       '/src/entry-server.ts'
     ))
   }
@@ -274,6 +371,7 @@ async function serveTextRoute(route, request, response) {
       '',
       '- [Docs](/docs.md): Guide-style essentials — what Arrow is, quickstart, components, reactive data, templates, and SSR.',
       '- [API Reference](/api.md): Signature-focused reference for every export across @arrow-js/core, @arrow-js/framework, @arrow-js/ssr, and @arrow-js/hydrate.',
+      '- [Playground Examples](/play.md): Source code for all interactive playground examples.',
       '',
       '---',
       '',
@@ -286,6 +384,10 @@ async function serveTextRoute(route, request, response) {
       '',
       apiMarkdown,
     ].join('\n')
+  } else if (route.render === 'playground') {
+    const reqUrl = new URL(request.url ?? '/', 'http://arrow.local')
+    const snapshot = reqUrl.searchParams.get('s') ?? undefined
+    body = await renderPlayground(snapshot)
   } else {
     body = await renderMarkdown(route.url)
   }
