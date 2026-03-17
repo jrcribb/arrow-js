@@ -1,10 +1,16 @@
 import '@shikijs/twoslash/style-rich.css'
 import arrowTypes from '../play/arrow-types.d.ts?raw'
+import arrowHtmlInjectionGrammar from '../../packages/vscode-arrow-html/syntaxes/arrowjs-html.injection.tmLanguage.json'
+import arrowHtmlGrammar from '../../packages/vscode-arrow-html/syntaxes/arrowjs-html.tmLanguage.json'
 import FrameworkExamples from './framework-examples'
 
 const TWOSLASH_TYPES_PATH = '/arrow-docs.d.ts'
 const TWOSLASH_REFERENCE = `/// <reference path="${TWOSLASH_TYPES_PATH}" />\n`
 const TYPESCRIPT_CDN_PREFIX = 'https://playgroundcdn.typescriptlang.org/cdn/'
+const SHIKI_THEMES = {
+  light: 'one-light',
+  dark: 'one-dark-pro',
+} as const
 const TYPESCRIPT_OPTIONAL_LIBS = new Set([
   'lib.core.d.ts',
   'lib.core.es6.d.ts',
@@ -18,8 +24,23 @@ const TWOSLASH_COMPILER_OPTIONS = {
   noImplicitAny: false,
   skipLibCheck: true,
 }
+const ARROW_HTML_LANGUAGE = {
+  ...arrowHtmlInjectionGrammar,
+  name: 'inline.arrowjs.html',
+  embeddedLanguages: ['html', 'typescript'],
+  injectTo: ['source.js', 'source.js.jsx', 'source.ts', 'source.tsx'],
+}
+const ARROW_HTML_GRAMMAR = {
+  ...arrowHtmlGrammar,
+  name: 'text.html.arrowjs',
+  embeddedLanguages: ['html', 'typescript'],
+}
 
 let highlighterLoader: ReturnType<typeof initHighlighter> | undefined
+const ARROW_TEMPLATE_PUNCTUATION_SCOPES = [
+  'punctuation.definition.template-expression',
+  'punctuation.section.embedded',
+]
 
 function createCodeWrapper(html: string) {
   const template = document.createElement('template')
@@ -86,9 +107,25 @@ function normalizeLanguage(language: string) {
   }
 }
 
+function hasArrowTemplatePunctuationScope(token: {
+  explanation?: Array<{
+    scopes: Array<{
+      scopeName: string
+    }>
+  }>
+}) {
+  return token.explanation?.some((explanation) =>
+    explanation.scopes.some((scope) =>
+      ARROW_TEMPLATE_PUNCTUATION_SCOPES.some((pattern) =>
+        scope.scopeName.includes(pattern)
+      )
+    )
+  )
+}
+
 async function initHighlighter() {
   const [
-    { createCssVariablesTheme, createHighlighter },
+    { createHighlighter },
     { createTransformerFactory, rendererRich },
     { createTwoslashFromCDN },
   ] = await Promise.all([
@@ -97,10 +134,16 @@ async function initHighlighter() {
     import('twoslash-cdn'),
   ])
 
-  const theme = createCssVariablesTheme()
   const highlighter = await createHighlighter({
-    themes: [theme],
-    langs: ['js', 'ts', 'html', 'shell'],
+    themes: [SHIKI_THEMES.light, SHIKI_THEMES.dark],
+    langs: [
+      'js',
+      'ts',
+      'html',
+      'shell',
+      ARROW_HTML_LANGUAGE,
+      ARROW_HTML_GRAMMAR,
+    ],
   })
 
   const twoslashFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -146,8 +189,33 @@ async function initHighlighter() {
 
   await twoslash.init()
 
+  const arrowTemplatePunctuationTransformer = {
+    name: 'arrow-template-punctuation',
+    span(
+      this: { addClassToHast: (node: unknown, className: string) => unknown },
+      hast: unknown,
+      _line: number,
+      _col: number,
+      _lineElement: unknown,
+      token: {
+        explanation?: Array<{
+          scopes: Array<{
+            scopeName: string
+          }>
+        }>
+      }
+    ) {
+      if (!hasArrowTemplatePunctuationScope(token)) {
+        return
+      }
+
+      return this.addClassToHast(hast, 'arrow-template-punctuation')
+    },
+  }
+
   return {
     highlighter,
+    arrowTemplatePunctuationTransformer,
     twoslashTransformer: createTransformerFactory(
       (code: string, lang: string, options: unknown) =>
         twoslash.runSync(code, lang, options),
@@ -165,6 +233,9 @@ async function loadHighlighter() {
 
 function renderCodeBlock(
   highlighter: Awaited<ReturnType<typeof initHighlighter>>['highlighter'],
+  arrowTemplatePunctuationTransformer: Awaited<
+    ReturnType<typeof initHighlighter>
+  >['arrowTemplatePunctuationTransformer'],
   twoslashTransformer: Awaited<ReturnType<typeof initHighlighter>>['twoslashTransformer'],
   code: string,
   lang: string,
@@ -172,7 +243,10 @@ function renderCodeBlock(
 ) {
   const options = {
     lang,
-    theme: 'css-variables',
+    themes: SHIKI_THEMES,
+    defaultColor: false as const,
+    includeExplanation: 'scopeName' as const,
+    transformers: [arrowTemplatePunctuationTransformer],
   }
 
   if (lang !== 'ts' || !enableTwoslash) {
@@ -183,6 +257,7 @@ function renderCodeBlock(
     const html = highlighter.codeToHtml(`${TWOSLASH_REFERENCE}${code}`, {
       ...options,
       transformers: [
+        arrowTemplatePunctuationTransformer,
         twoslashTransformer({
           throws: true,
         }),
@@ -197,7 +272,8 @@ function renderCodeBlock(
 }
 
 export default async function highlight() {
-  const { highlighter, twoslashTransformer } = await loadHighlighter()
+  const { highlighter, arrowTemplatePunctuationTransformer, twoslashTransformer } =
+    await loadHighlighter()
   const codeBlocks = document.querySelectorAll('pre code[class*="language-"]')
 
   codeBlocks.forEach((block) => {
@@ -209,6 +285,7 @@ export default async function highlight() {
       !block.closest('[data-disable-twoslash="true"]')
     const html = renderCodeBlock(
       highlighter,
+      arrowTemplatePunctuationTransformer,
       twoslashTransformer,
       code,
       lang,
