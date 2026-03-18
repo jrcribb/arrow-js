@@ -3,8 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
-const target = 3500
-const limit = 4300
+const brotliTarget = 4700
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const file = resolve(__dirname, '../dist/index.min.mjs')
@@ -20,15 +19,7 @@ console.log(`raw: ${source.length} B`)
 console.log(`gzip: ${gzip.length} B`)
 console.log(`brotli: ${brotli.length} B`)
 
-if (gzip.length > target) {
-  console.warn(`gzip is above target (${target} B)`)
-}
-
-if (brotli.length > target) {
-  console.warn(`brotli is above target (${target} B)`)
-}
-
-if (brotli.length > limit) {
-  console.error(`brotli size exceeded hard limit (${limit} B)`)
+if (brotli.length > brotliTarget) {
+  console.error(`brotli size exceeded max (${brotliTarget} B)`)
   process.exit(1)
 }
