@@ -1,5 +1,10 @@
-import { html, reactive } from '@src/index'
-import logoUrl from '../img/logo.png'
+import { html, reactive } from '@arrow-js/core'
+import {
+  applyArrowHtmlPreset,
+  arrowHtmlTokenClassName,
+  tokenizeArrowHtmlTemplates,
+} from '@arrow-js/highlight'
+import { ThemeToggle } from '../src/components/ThemeToggle'
 import arrowTypes from './arrow-types.d.ts?raw'
 import {
   ENTRY_FILE,
@@ -23,6 +28,8 @@ const state = reactive({
       ? window.innerWidth > DESKTOP_SPLIT_BREAKPOINT
       : true,
   copied: false,
+  copyMenuOpen: false,
+  sharing: false,
   editorWidth: 0,
   exampleId:
     typeof window !== 'undefined'
@@ -61,6 +68,45 @@ let htmlDecorations
 
 const models = new Map()
 const viewStates = new Map()
+
+applyArrowHtmlPreset(document.documentElement)
+
+function defineEditorThemes() {
+  if (!monaco) return
+
+  monaco.editor.defineTheme('arrow-one-light', {
+    base: 'vs',
+    inherit: true,
+    colors: {
+      'editor.background': '#FAFAFA',
+      'editor.foreground': '#383A42',
+      'editor.lineHighlightBackground': '#383A420C',
+      'editor.selectionBackground': '#E5E5E6',
+      'editorCursor.foreground': '#526FFF',
+      'editorLineNumber.foreground': '#9D9D9F',
+      'editorLineNumber.activeForeground': '#383A42',
+      'editorIndentGuide.background1': '#383A4233',
+      'editorIndentGuide.activeBackground1': '#626772',
+    },
+    rules: [
+      { token: 'comment', foreground: 'A0A1A7', fontStyle: 'italic' },
+      { token: 'string', foreground: '50A14F' },
+      { token: 'number', foreground: '986801' },
+      { token: 'keyword', foreground: 'A626A4' },
+      { token: 'delimiter', foreground: '383A42' },
+      { token: 'operator', foreground: '0184BC' },
+      { token: 'type', foreground: 'C18401' },
+      { token: 'type.identifier', foreground: 'C18401' },
+      { token: 'identifier', foreground: '383A42' },
+      { token: 'variable', foreground: 'E45649' },
+      { token: 'variable.predefined', foreground: 'E45649' },
+      { token: 'function', foreground: '4078F2' },
+      { token: 'tag', foreground: 'E45649' },
+      { token: 'attribute.name', foreground: '986801' },
+      { token: 'attribute.value', foreground: '50A14F' },
+    ],
+  })
+}
 
 const encodeText = (text) => {
   const bytes = new TextEncoder().encode(text)
@@ -161,7 +207,21 @@ const snapshotsEqual = (left, right) =>
       right.files[index]?.[0] === name && right.files[index]?.[1] === code
   )
 
-const readInitialSnapshot = () => {
+const readInitialSnapshot = async () => {
+  const params = new URLSearchParams(window.location.search)
+  const shareId = params.get('id')
+
+  if (shareId) {
+    try {
+      const res = await fetch(`/api/play/${shareId}`)
+      if (res.ok) {
+        const { snapshot } = await res.json()
+        const parsed = parseSnapshot(snapshot)
+        if (parsed) return parsed
+      }
+    } catch {}
+  }
+
   state.exampleId = getExampleIdFromLocation()
 
   const parsed = parseSnapshot(window.location.hash.slice(1))
@@ -286,13 +346,24 @@ const scheduleHashSync = () => {
   hashTimer = window.setTimeout(writeHash, 420)
 }
 
+const sendThemeToPreview = () => {
+  if (!previewFrame?.contentWindow) return
+  previewFrame.contentWindow.postMessage(
+    { source: 'arrow-play-host', type: 'theme', theme: document.documentElement.dataset.theme || 'light' },
+    '*'
+  )
+}
+
 const updateEditorTheme = () => {
   if (!monaco) return
   monaco.editor.setTheme(
-    document.documentElement.dataset.theme === 'dark' ? 'vs-dark' : 'vs'
+    document.documentElement.dataset.theme === 'dark' ? 'vs-dark' : 'arrow-one-light'
   )
   scheduleHtmlHighlight()
+  sendThemeToPreview()
 }
+
+
 
 const flattenMessage = (message) => {
   if (typeof message === 'string') return message
@@ -398,255 +469,19 @@ const scheduleCompile = () => {
   }, 140)
 }
 
-const skipString = (source, index, quote) => {
-  for (let i = index + 1; i < source.length; i++) {
-    if (source[i] === '\\') {
-      i++
-      continue
-    }
-    if (source[i] === quote) return i + 1
-  }
-  return source.length
-}
-
-const skipLineComment = (source, index) => {
-  const next = source.indexOf('\n', index + 2)
-  return next === -1 ? source.length : next
-}
-
-const skipBlockComment = (source, index) => {
-  const next = source.indexOf('*/', index + 2)
-  return next === -1 ? source.length : next + 2
-}
-
-const skipTemplateLiteral = (source, index) => {
-  for (let i = index + 1; i < source.length; i++) {
-    if (source[i] === '\\') {
-      i++
-      continue
-    }
-    if (source[i] === '`') return i + 1
-    if (source[i] === '$' && source[i + 1] === '{') {
-      i = skipJsExpression(source, i + 2) - 1
-    }
-  }
-  return source.length
-}
-
-const skipJsExpression = (source, index, regions) => {
-  let depth = 0
-  for (let i = index; i < source.length; i++) {
-    const char = source[i]
-    const tagLength = templateTagLength(source, i)
-
-    if (tagLength) {
-      i = scanTaggedTemplate(source, i + tagLength, regions) - 1
-      continue
-    }
-    if (char === "'" || char === '"') {
-      i = skipString(source, i, char) - 1
-      continue
-    }
-    if (char === '`') {
-      i = skipTemplateLiteral(source, i) - 1
-      continue
-    }
-    if (char === '/' && source[i + 1] === '/') {
-      i = skipLineComment(source, i) - 1
-      continue
-    }
-    if (char === '/' && source[i + 1] === '*') {
-      i = skipBlockComment(source, i) - 1
-      continue
-    }
-    if (char === '{') {
-      depth++
-      continue
-    }
-    if (char === '}') {
-      if (!depth) return i + 1
-      depth--
-    }
-  }
-  return source.length
-}
-
-const templateTagLength = (source, index) => {
-  if (!source.startsWith('html`', index) && !source.startsWith('t`', index)) {
-    return 0
-  }
-  const prev = source[index - 1]
-  return prev && /[\w$.]/.test(prev) ? 0 : source[index] === 'h' ? 5 : 2
-}
-
-const scanTaggedTemplate = (source, index, regions) => {
-  let segmentStart = index
-  for (let i = index; i < source.length; i++) {
-    if (source[i] === '$' && source[i + 1] === '{') {
-      if (segmentStart < i) regions.push([segmentStart, i])
-      i = skipJsExpression(source, i + 2, regions) - 1
-      segmentStart = i + 1
-      continue
-    }
-    if (source[i] === '`') {
-      if (segmentStart < i) regions.push([segmentStart, i])
-      return i + 1
-    }
-  }
-  if (segmentStart < source.length) regions.push([segmentStart, source.length])
-  return source.length
-}
-
-const collectHtmlTemplateRegions = (source) => {
-  const regions = []
-  for (let i = 0; i < source.length; i++) {
-    const char = source[i]
-    const tagLength = templateTagLength(source, i)
-    if (tagLength) {
-      i = scanTaggedTemplate(source, i + tagLength, regions) - 1
-      continue
-    }
-    if (char === "'" || char === '"') {
-      i = skipString(source, i, char) - 1
-      continue
-    }
-    if (char === '`') {
-      i = skipTemplateLiteral(source, i) - 1
-      continue
-    }
-    if (char === '/' && source[i + 1] === '/') {
-      i = skipLineComment(source, i) - 1
-      continue
-    }
-    if (char === '/' && source[i + 1] === '*') {
-      i = skipBlockComment(source, i) - 1
-    }
-  }
-  return regions
-}
-
-const tokenizeHtmlSegment = (segment) => {
-  const tokens = []
-  const push = (start, end, className) => {
-    if (end > start) tokens.push([start, end, className])
-  }
-
-  let i = 0
-  while (i < segment.length) {
-    if (segment.startsWith('<!--', i)) {
-      const end = segment.indexOf('-->', i + 4)
-      const next = end === -1 ? segment.length : end + 3
-      push(i, next, 'play-html-comment')
-      i = next
-      continue
-    }
-
-    if (segment[i] !== '<') {
-      i++
-      continue
-    }
-
-    const next = segment[i + 1]
-    if (!next || /[\s=]/.test(next)) {
-      i++
-      continue
-    }
-
-    let cursor = i
-    if (segment.startsWith('</', cursor)) {
-      push(cursor, cursor + 2, 'play-html-delimiter')
-      cursor += 2
-    } else {
-      push(cursor, cursor + 1, 'play-html-delimiter')
-      cursor++
-    }
-
-    const nameStart = cursor
-    while (cursor < segment.length && /[A-Za-z0-9:_-]/.test(segment[cursor]))
-      cursor++
-    push(nameStart, cursor, 'play-html-tag')
-
-    while (cursor < segment.length) {
-      while (cursor < segment.length && /\s/.test(segment[cursor])) cursor++
-
-      if (segment.startsWith('/>', cursor)) {
-        push(cursor, cursor + 2, 'play-html-delimiter')
-        cursor += 2
-        break
-      }
-      if (segment[cursor] === '>') {
-        push(cursor, cursor + 1, 'play-html-delimiter')
-        cursor++
-        break
-      }
-
-      const attrStart = cursor
-      while (cursor < segment.length && !/[\s=>/]/.test(segment[cursor])) {
-        cursor++
-      }
-      push(attrStart, cursor, 'play-html-attr-name')
-
-      while (cursor < segment.length && /\s/.test(segment[cursor])) cursor++
-      if (segment[cursor] !== '=') continue
-
-      cursor++
-      while (cursor < segment.length && /\s/.test(segment[cursor])) cursor++
-      const valueStart = cursor
-      const quote = segment[cursor]
-
-      if (quote === '"' || quote === "'") {
-        cursor++
-        while (cursor < segment.length) {
-          if (segment[cursor] === '\\') {
-            cursor += 2
-            continue
-          }
-          if (segment[cursor] === quote) {
-            cursor++
-            break
-          }
-          cursor++
-        }
-      } else {
-        while (cursor < segment.length && !/[\s>]/.test(segment[cursor]))
-          cursor++
-      }
-      push(valueStart, cursor, 'play-html-attr-value')
-    }
-
-    i = cursor
-  }
-
-  return tokens
-}
-
 const buildHtmlDecorations = (model) => {
   const source = model.getValue()
-  const regions = collectHtmlTemplateRegions(source)
-  const decorations = []
-
-  for (const [startOffset, endOffset] of regions) {
-    const segment = source.slice(startOffset, endOffset)
-    for (const [localStart, localEnd, className] of tokenizeHtmlSegment(
-      segment
-    )) {
-      const start = startOffset + localStart
-      const end = startOffset + localEnd
-      decorations.push({
-        options: {
-          inlineClassName: className,
-        },
-        range: new monaco.Range(
-          model.getPositionAt(start).lineNumber,
-          model.getPositionAt(start).column,
-          model.getPositionAt(end).lineNumber,
-          model.getPositionAt(end).column
-        ),
-      })
-    }
-  }
-
-  return decorations
+  return tokenizeArrowHtmlTemplates(source).map(({ start, end, type }) => ({
+    options: {
+      inlineClassName: arrowHtmlTokenClassName(type),
+    },
+    range: new monaco.Range(
+      model.getPositionAt(start).lineNumber,
+      model.getPositionAt(start).column,
+      model.getPositionAt(end).lineNumber,
+      model.getPositionAt(end).column
+    ),
+  }))
 }
 
 const applyHtmlHighlight = () => {
@@ -716,13 +551,76 @@ const restoreSnapshot = (snapshot) => {
   }
 }
 
-const copyUrl = async () => {
-  writeHash()
-  await navigator.clipboard.writeText(window.location.href)
+const copyMarkdown = async () => {
+  const encoded = encodeSnapshot()
+  const url = `/play.md?s=${encoded}`
+  try {
+    const res = await fetch(url)
+    const text = await res.text()
+    await navigator.clipboard.writeText(text)
+  } catch {
+    return
+  }
   state.copied = true
+  state.copyMenuOpen = false
   window.setTimeout(() => {
     state.copied = false
-  }, 1200)
+  }, 2000)
+}
+
+const getShareUrl = async () => {
+  const snapshot = encodeSnapshot()
+  try {
+    const res = await fetch('/api/play', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snapshot }),
+    })
+    if (res.ok) {
+      const { id } = await res.json()
+      return `${window.location.origin}/play/?id=${id}`
+    }
+  } catch {}
+  // Fallback: hash-based URL
+  writeHash()
+  return window.location.href
+}
+
+const sharePlayground = async () => {
+  state.sharing = true
+  try {
+    const url = await getShareUrl()
+    await navigator.clipboard.writeText(url)
+    state.copied = true
+    state.copyMenuOpen = false
+    window.setTimeout(() => { state.copied = false }, 2000)
+  } finally {
+    state.sharing = false
+  }
+}
+
+const openGitHubIssue = async () => {
+  state.sharing = true
+  try {
+    const playUrl = await getShareUrl()
+    const issueUrl = `https://github.com/justin-schroeder/arrow-js/issues/new?labels=playground&body=${encodeURIComponent(`Describe the issue…\n\nPlayground: ${playUrl}`)}`
+    window.open(issueUrl, '_blank')
+    closeCopyMenu()
+  } finally {
+    state.sharing = false
+  }
+}
+
+const markdownUrl = '/play.md'
+
+
+const toggleCopyMenu = (e) => {
+  e.stopPropagation()
+  state.copyMenuOpen = !state.copyMenuOpen
+}
+
+const closeCopyMenu = () => {
+  state.copyMenuOpen = false
 }
 
 const createFileTemplate = (name) => {
@@ -896,6 +794,7 @@ const onFrameMessage = (event) => {
   if (!data || data.source !== 'arrow-play-preview') return
   if (data.type === 'frame-ready') {
     previewReady = true
+    sendThemeToPreview()
     if (pendingModules) runPreview(pendingModules)
   }
 }
@@ -948,6 +847,7 @@ const loadMonaco = () => {
 
 const initMonaco = async () => {
   monaco = await loadMonaco()
+  defineEditorThemes()
   updateEditorTheme()
 
   monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
@@ -970,7 +870,7 @@ const initMonaco = async () => {
     'file:///node_modules/@arrow-js/core/index.d.ts'
   )
 
-  restoreSnapshot(readInitialSnapshot())
+  restoreSnapshot(await readInitialSnapshot())
 
   editor = monaco.editor.create(document.getElementById('play-editor'), {
     automaticLayout: true,
@@ -998,14 +898,57 @@ const initMonaco = async () => {
 const shell = html`
   <div class="play-shell">
     <header class="play-topbar">
-      <a class="play-brand" href="/" aria-label="ArrowJS home">
-        <img src="${logoUrl}" alt="ArrowJS" />
+      <a class="play-brand" href="/" aria-label="ArrowJS home" style="color:var(--play-text)">
+        <svg viewBox="0 0 535.37 83.47" style="height:20px;width:auto" aria-label="ArrowJS"><path fill="currentColor" d="M451,40.65c-.14,17.63-9.85,32.23-25.39,38.39-15.74,6.24-33.2,2.32-45.41-10.22-.69-.7-1.18-1.6-2.01-2.74-1.77,1.68-3.05,2.89-4.33,4.1-21.89,20.87-58.05,12.58-67.46-15.6-1.35-4.05-2.07-8.47-2.17-12.74-.29-12.66-.12-25.34-.11-38.01,0-.8,0,0,0-2.38,8.63-.49,16.36,6.16,16.82,15.24,.38,7.65,.15,15.33,.19,23,.03,6.7,1.53,12.91,6.25,17.96,7.03,7.51,15.46,10.05,25.4,6.89,8.61-2.73,15.62-11.15,15.97-20.42,.46-12.15,.24-24.33,.3-36.5,.01-1.97,.01-3.95,.01-5.86,8.22-1.36,16.19,5.62,16.83,14.66,.36,5.14,.09,10.33,.18,15.49,.08,4.33-.06,8.69,.46,12.97,1.47,12.15,12.04,21.26,24.05,21.03,12.22-.24,22.54-10,23.2-22.46,.44-8.31,.07-16.66,.28-24.99,.22-8.67,5.49-15.17,13.37-17.14,.93-.23,2.22-.21,3.57-.26,0,4.51,.01,3.13,.01,4.58,.02,11.67,.09,23.34-.01,35.01Z"/><path fill="currentColor" d="M82.66,82.31c-16.44-.39-32.52,.46-48.27-1.43C7.64,77.67-7.29,46.65,5.42,22.82,13.54,7.6,30.82-1.25,47.6,1.21c17.34,2.54,31.22,15.66,34.7,32.8,.13,.65,.34,1.31,.34,1.96,.02,15.11,.02,30.23,.02,46.33Zm-17.4-15.92c0-10.59,.86-20.28-.22-29.76-1.31-11.54-12.27-19.89-23.6-19.6-11.93,.3-21.72,9.35-23.18,21.43-1.47,12.17,5.62,24.09,17.28,26.18,9.67,1.73,19.74,1.25,29.71,1.75Z"/><path fill="currentColor" d="M215.42,41.42c.06-22.65,18.33-40.54,41.32-40.45,22.46,.1,40.61,18.39,40.47,40.79-.13,22.39-18.37,40.23-41.06,40.17-22.64-.06-40.78-18.11-40.73-40.5Zm17.08-.61c-.42,13.43,10,24.72,23.16,25.1,13.11,.37,24.17-10.34,24.54-23.77,.37-13.44-9.93-24.57-23.21-25.1-13.02-.51-24.07,10.2-24.49,23.77Z"/><path fill="currentColor" d="M226.47,.95c-.2,8.84-6.03,15.18-14.18,15.88-2.82,.24-5.66,.06-8.5,.14-14.51,.41-24.4,10.08-24.85,24.61-.25,8,.11,16.01-.17,24-.32,9.29-7.2,15.81-16.66,15.94-.07-1.46-.21-2.93-.22-4.39-.02-11.5-.07-23.01,0-34.51,.17-24.15,17.6-41.52,41.76-41.66,7.48-.04,14.96,0,22.8,0Z"/><path fill="currentColor" d="M93.16,81.58c-.16-.44-.46-.9-.46-1.36,.02-14.49-.52-29.01,.28-43.46,1-18.14,17.57-34.24,36.12-35.56,9.23-.66,18.55-.11,27.83-.11-.05,8.85-5.94,15.17-14.41,15.78-2.82,.2-5.66,.02-8.49,.12-14.33,.51-24.01,10.15-24.34,24.42-.18,7.66,.12,15.33-.11,22.99-.3,10.08-6.75,16.7-16.41,17.18Z"/><path fill="currentColor" d="M501.11,31.13h6.35c3.98,6.69,8.72,8.73,15.5,6.73,2.49-.74,4.12-2.23,4.3-4.89,.18-2.61-.97-4.66-3.49-5.44-3.64-1.13-7.54-1.56-11.03-3.01-3.11-1.29-6.51-3-8.55-5.52-3.71-4.59-1.71-12,3.36-15.3,5.71-3.72,15.33-3.63,20.89,.26,3.3,2.31,5.43,5.3,5.25,9.9h-6.6c-1.37-6.24-6.4-6.69-11.9-6.03-2.65,.32-4.88,1.44-5.25,4.44-.38,3.06,1.57,4.62,4.14,5.43,2.37,.74,4.87,1.1,7.26,1.79,2.39,.68,4.83,1.34,7.05,2.41,4.5,2.18,6.61,6,6.37,10.96-.23,4.72-2.47,8.23-6.91,10.13-5.94,2.54-12.04,2.65-18.03,.47-5.33-1.94-8.2-6-8.7-12.34Z"/><path fill="currentColor" d="M467.9,32.2h5.93c1.1,1.61,1.93,3.81,3.52,4.94,4.16,2.96,9.39,.24,9.6-5.07,.31-7.81,.14-15.64,.17-23.47,0-2.13,0-4.25,0-6.71h7.3c0,6.52,.06,12.81-.02,19.1-.06,4.65,.14,9.37-.56,13.94-1.07,6.98-7.06,10.65-14.98,9.84-6.88-.7-10.82-5.13-10.95-12.58Z"/></svg>
       </a>
       <div class="play-actions">
-        <button data-tone="primary" @click="${copyUrl}">
-          ${() => (state.copied ? 'Copied' : 'Copy URL')}
-        </button>
+        <div class="play-copy-menu">
+          <div class="play-copy-trigger">
+            <button class="play-copy-btn" @click="${sharePlayground}">
+              <span class="play-copy-icon play-copy-icon--link"></span>
+              ${() => (state.sharing ? 'Sharing…' : state.copied ? 'Copied!' : 'Copy URL')}
+            </button>
+            <button class="play-copy-toggle" @click="${toggleCopyMenu}">
+              <span class="play-copy-icon play-copy-icon--chevron"></span>
+            </button>
+          </div>
+          <div class="play-copy-dropdown" data-open="${() => (state.copyMenuOpen ? '' : false)}">
+            <button class="play-copy-item" data-busy="${() => state.sharing ? 'true' : false}" @click="${sharePlayground}">
+              <span class="play-copy-icon play-copy-icon--link"></span>
+              <div>
+                <div class="play-copy-item-title">${() => state.sharing ? 'Sharing…' : 'Copy URL'}</div>
+                <div class="play-copy-item-desc">Copy shareable playground link</div>
+              </div>
+            </button>
+            <button class="play-copy-item" @click="${copyMarkdown}">
+              <span class="play-copy-icon play-copy-icon--copy"></span>
+              <div>
+                <div class="play-copy-item-title">Copy code</div>
+                <div class="play-copy-item-desc">Copy all files as Markdown for LLMs</div>
+              </div>
+            </button>
+            <button class="play-copy-item" @click="${() => {
+              const encoded = encodeSnapshot()
+              window.open(`/play.md?s=${encoded}`, '_blank')
+              closeCopyMenu()
+            }}">
+              <span class="play-copy-icon play-copy-icon--markdown"></span>
+              <div>
+                <div class="play-copy-item-title">View as Markdown <span class="play-copy-external">&nearr;</span></div>
+                <div class="play-copy-item-desc">View code as plain text</div>
+              </div>
+            </button>
+            <button class="play-copy-item" data-busy="${() => state.sharing ? 'true' : false}" @click="${openGitHubIssue}">
+              <span class="play-copy-icon play-copy-icon--github"></span>
+              <div>
+                <div class="play-copy-item-title">${() => state.sharing ? 'Sharing…' : 'Open GitHub Issue'} <span class="play-copy-external">&nearr;</span></div>
+                <div class="play-copy-item-desc">Create a draft issue linked to this playground</div>
+              </div>
+            </button>
+          </div>
+        </div>
         <a class="play-link" href="/docs/">Docs</a>
+        ${ThemeToggle('play-icon-button play-theme-toggle')}
       </div>
     </header>
     <main class="play-workspace">
@@ -1147,13 +1090,20 @@ window.addEventListener('message', onFrameMessage)
 window.addEventListener('hashchange', syncFromLocation)
 window.addEventListener('popstate', syncFromLocation)
 window.addEventListener('mousedown', (event) => {
-  if (!state.menuFile) return
-  if (event.target instanceof Element && event.target.closest('.play-context-menu'))
-    return
-  closeFileMenu()
+  if (state.menuFile) {
+    if (!(event.target instanceof Element && event.target.closest('.play-context-menu')))
+      closeFileMenu()
+  }
+  if (state.copyMenuOpen) {
+    if (!(event.target instanceof Element && event.target.closest('.play-copy-menu')))
+      closeCopyMenu()
+  }
 })
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeFileMenu()
+  if (event.key === 'Escape') {
+    closeFileMenu()
+    closeCopyMenu()
+  }
 })
 window.addEventListener('resize', () => {
   syncResizeMode()

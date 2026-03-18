@@ -25,7 +25,8 @@
   "size-limit": [
     {
       "path": "dist/index.min.mjs",
-      "limit": "4.7 KB"
+      "limit": "4.7 KB",
+      "brotli": true
     }
   ],
   "scripts": {

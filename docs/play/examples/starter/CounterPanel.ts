@@ -1,25 +1,28 @@
 import { component, html, reactive } from '@arrow-js/core'
 
-export const CounterPanel = component((props: { model: { count: number } }) => {
-  const local = reactive({
-    clicks: 0,
-  })
+export const CounterPanel = component((props: { count: number }) => {
+  const local = reactive({ count: 0 })
 
-  return html`<section class="starter-panel">
-    <div>
-      <p class="starter-panel__label">Shared count</p>
-      <strong class="starter-panel__value">${() => props.model.count}</strong>
+  return html`<div class="counter">
+    <div class="gauges">
+      <div class="gauge">
+        <span class="gauge-label">App state</span>
+        <span class="gauge-value">${() => props.count}</span>
+        <div class="gauge-actions">
+          <button class="btn btn--amber btn--sm" @click="${() => props.count--}">−</button>
+          <button class="btn btn--amber btn--sm" @click="${() => props.count++}">+</button>
+        </div>
+        <span class="gauge-hint">Visible to other components</span>
+      </div>
+      <div class="gauge gauge--local">
+        <span class="gauge-label">Component state</span>
+        <span class="gauge-value">${() => local.count}</span>
+        <div class="gauge-actions">
+          <button class="btn btn--local btn--sm" @click="${() => local.count--}">−</button>
+          <button class="btn btn--local btn--sm" @click="${() => local.count++}">+</button>
+        </div>
+        <span class="gauge-hint">Private to this component</span>
+      </div>
     </div>
-    <div class="starter-panel__actions">
-      <button class="starter-button" @click="${() => props.model.count--}">
-        Decrement
-      </button>
-      <button class="starter-button" @click="${() => props.model.count++}">
-        Increment
-      </button>
-      <button class="starter-button starter-button--ghost" @click="${() => local.clicks++}">
-        Local clicks ${() => local.clicks}
-      </button>
-    </div>
-  </section>`
+  </div>`
 })
