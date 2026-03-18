@@ -61,7 +61,7 @@ export interface ArrowTemplate {
    */
 }
 
-type ArrowTemplateKey = string | number | undefined
+export type ArrowTemplateKey = string | number | undefined
 
 /**
  * Types of return values that can be rendered.
