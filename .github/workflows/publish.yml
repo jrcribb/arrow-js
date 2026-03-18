@@ -74,11 +74,14 @@ jobs:
             local dir="$1"
             pushd "$dir" >/dev/null
             local tarball
-            tarball=$(pnpm pack --pack-destination "$PACK_DIR")
+            tarball=$(
+              pnpm pack --pack-destination "$PACK_DIR" --json \
+                | node -e "let data='';process.stdin.on('data',chunk=>data+=chunk);process.stdin.on('end',()=>process.stdout.write(JSON.parse(data).filename));"
+            )
             popd >/dev/null
 
             for attempt in 1 2 3; do
-              npm publish "$PACK_DIR/$tarball" --tag "$NPM_TAG" --access public && return 0
+              npm publish "$tarball" --tag "$NPM_TAG" --access public && return 0
               echo "Publish attempt $attempt failed for $dir, retrying in 5s..."
               sleep 5
             done
