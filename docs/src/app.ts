@@ -48,7 +48,7 @@ function createApiPage(url: string): DocsPage {
   }
 }
 
-export function createPage(url: string): DocsPage {
+export function routeToPage(url: string): DocsPage {
   const path = normalizePath(url)
   if (path === '/api') return createApiPage(url)
   return createHomePage(url)

@@ -22,17 +22,15 @@ export function WhyArrow() {
       </h2>
       <div class="space-y-4 text-zinc-600 dark:text-zinc-400 leading-relaxed">
         <p>
-          Arrow is a small reactive UI framework built around platform primitives:
-          JavaScript modules, functions, and template literals. Arrow is just TypeScript, so your coding agent already knows how to use it really well.
+          Arrow is a reactive UI framework built around JavaScript primitives:
+          Modules, functions, and template literals. Arrow is just TypeScript, so your coding agent already knows how to use it really well.
         </p>
-        <p>
-          You only need 3 functions:
-          <ul>
-            <li><code>html</code></li>
-            <li><code>reactive</code></li>
-            <li><code>component</code></li>
-          </ul>
-        </p>
+        <p>You only need 3 functions:</p>
+        <ul>
+          <li><code>reactive</code></li>
+          <li><code>html</code></li>
+          <li><code>component</code></li>
+        </ul>
         <p>
            Unlike other major frameworks, there is no "idomatic" way to use Arrow since it's just TypeScript functions and template literals. The entire documentation fits in less than 5% of a 200k context window.
         </p>
@@ -124,7 +122,10 @@ const Counter = component((props: Props&lt;{ count: number }&gt;) =&gt; {
   &lt;/button&gt;\`
 })
 
-html\`\${Counter(parentState)}\`</code></pre>
+html\`&lt;section&gt;
+  &lt;h3&gt;Dashboard&lt;/h3&gt;
+  \${Counter(parentState)}
+&lt;/section&gt;\`</code></pre>
         </div>
 
         <div class="callout callout-tip">
@@ -137,20 +138,22 @@ html\`\${Counter(parentState)}\`</code></pre>
         </div>
 
         <p>
-          If you only want part of a larger reactive object, use
-          <code>pick(source, ...keys)</code> to create a live narrowed prop view
-          without writing a call-site closure.
+          In the common case, just pass a reactive object directly as the
+          component props.
         </p>
 
         <div class="code-block">
-          <pre><code class="language-ts">import { component, html, pick, reactive } from '@arrow-js/core'
+          <pre><code class="language-ts">import { component, html, reactive } from '@arrow-js/core'
 
 const state = reactive({ count: 1, theme: 'dark' })
 const Counter = component((props) =&gt;
   html\`&lt;strong&gt;\${() =&gt; props.count}&lt;/strong&gt;\`
 )
 
-html\`\${Counter(pick(state, 'count'))}\`</code></pre>
+html\`&lt;p&gt;
+  Current count:
+  \${Counter(state)}
+&lt;/p&gt;\`</code></pre>
         </div>
 
         <div class="callout callout-tip">
@@ -171,16 +174,20 @@ html\`\${Counter(pick(state, 'count'))}\`</code></pre>
 
         <div class="code-block">
           <pre><code class="language-ts">import { component, html } from '@arrow-js/core'
+import type { Props } from '@arrow-js/core'
 
 type User = { id: string; name: string }
 
-const UserName = component(async ({ id }: { id: string }) =&gt; {
-  const user = await fetch(\`/api/users/\${id}\`)
-    .then((r) =&gt; r.json() as Promise&lt;User&gt;)
-  return user.name
-})
+const UserName = component(
+  async ({ id }: Props&lt;{ id: string }&gt;) =&gt; {
+    const user = await fetch(\`/api/users/\${id}\`)
+      .then((r) =&gt; r.json() as Promise&lt;User&gt;)
+    return user.name
+  },
+  { fallback: html\`&lt;span&gt;Loading user…&lt;/span&gt;\` }
+)
 
-const UserCard = component((props: { id: string }) =&gt;
+const UserCard = component((props: Props&lt;{ id: string }&gt;) =&gt;
   html\`&lt;article&gt;\${UserName(props)}&lt;/article&gt;\`
 )</code></pre>
         </div>
@@ -217,6 +224,10 @@ export function ReactiveData() {
         <code class="text-lg ml-2">r</code>
       </h2>
       <div class="space-y-4 text-zinc-600 dark:text-zinc-400 leading-relaxed">
+        <p>
+          <code>reactive()</code> turns plain objects, arrays, or expressions
+          into live state that Arrow can track and update from.
+        </p>
         <p>
           <code>reactive(value)</code> or <code>reactive(() =&gt; value)</code>
         </p>
@@ -345,6 +356,10 @@ export function Templates() {
         <code class="text-lg ml-2">t</code>
       </h2>
       <div class="space-y-4 text-zinc-600 dark:text-zinc-400 leading-relaxed">
+        <p>
+          To render DOM elements with Arrow you use the
+          <code>html</code> tagged template literal.
+        </p>
         <p><code>html\`...\`</code> &mdash; create a mountable template</p>
         <ul class="list-disc pl-6 space-y-2">
           <li>
@@ -352,8 +367,10 @@ export function Templates() {
             components.
           </li>
           <li>
-            Arrow is static by default. Expressions only stay live when they are
-            functions.
+            Expression slots are static by default, but if callable functions
+            are provided they will update when their respective reactive data is
+            changed. In other words <code>\${data.foo}</code> is static but
+            <code>\${() =&gt; data.foo}</code> is reactive.
           </li>
           <li>
             Templates can render text, attributes, properties, lists, nested
@@ -361,12 +378,26 @@ export function Templates() {
           </li>
         </ul>
 
-        <p>Static expressions render once. Function expressions stay live.</p>
+        <p>
+          Plain values render once. If you pass a function like
+          <code>() =&gt; data.count</code>, Arrow tracks the reactive reads inside
+          that function and updates only that part of the template when they
+          change.
+        </p>
 
         <h3 class="text-lg font-semibold text-zinc-900 dark:text-white pt-4">
           Attributes
         </h3>
         <p>Use a function expression to keep an attribute in sync.</p>
+        <div class="code-block">
+          <pre><code class="language-ts">import { html, reactive } from '@arrow-js/core'
+
+const data = reactive({ disabled: false })
+
+html\`&lt;button disabled="\${() =&gt; data.disabled}"&gt;
+  Save
+&lt;/button&gt;\`</code></pre>
+        </div>
         <div class="callout callout-tip">
           <div class="callout-label">Tip</div>
           <p>
@@ -374,12 +405,15 @@ export function Templates() {
             remove the attribute. This makes it easy to toggle attributes.
           </p>
         </div>
+        <div class="code-block">
+          <pre><code class="language-ts">import { html, reactive } from '@arrow-js/core'
 
-        <h3 class="text-lg font-semibold text-zinc-900 dark:text-white pt-4">
-          Properties
-        </h3>
-        <p>Prefix an attribute with <code>.</code> to write an IDL property.</p>
+const data = reactive({ disabled: false })
 
+html\`&lt;button disabled="\${() =&gt; data.disabled ? true : false}"&gt;
+  Save
+&lt;/button&gt;\`</code></pre>
+        </div>
         <h3 class="text-lg font-semibold text-zinc-900 dark:text-white pt-4">
           Lists
         </h3>
@@ -387,12 +421,37 @@ export function Templates() {
           Return an array of templates to render a list. Add
           <code>.key(...)</code> when identity must survive reorders.
         </p>
+        <div class="code-block">
+          <pre><code class="language-ts">import { html, reactive } from '@arrow-js/core'
+
+const data = reactive({
+  todos: [
+    { id: 1, text: 'Write docs' },
+    { id: 2, text: 'Ship app' },
+  ],
+})
+
+html\`&lt;ul&gt;
+  \${() =&gt; data.todos.map((todo) =&gt;
+    html\`&lt;li&gt;\${todo.text}&lt;/li&gt;\`.key(todo.id)
+  )}
+&lt;/ul&gt;\`</code></pre>
+        </div>
         <div class="callout callout-tip">
           <div class="callout-label">Tip</div>
           <p>
             Keys are only necessary if you want to preserve the DOM nodes and
             their state. Avoid using the index as a key.
           </p>
+        </div>
+        <div class="code-block">
+          <pre><code class="language-ts">import { html, reactive } from '@arrow-js/core'
+
+const data = reactive({ tags: ['alpha', 'beta', 'gamma'] })
+
+html\`&lt;ul&gt;
+  \${() =&gt; data.tags.map((tag) =&gt; html\`&lt;li&gt;\${tag}&lt;/li&gt;\`)}
+&lt;/ul&gt;\`</code></pre>
         </div>
 
         <h3 class="text-lg font-semibold text-zinc-900 dark:text-white pt-4">
@@ -522,7 +581,7 @@ export function Routing() {
       </h2>
       <div class="space-y-4 text-zinc-600 dark:text-zinc-400 leading-relaxed">
         <p>
-          The Vite scaffold uses a simple <code>createPage(url)</code> entry so
+          The Vite scaffold uses a simple <code>routeToPage(url)</code> entry so
           the server and browser both resolve the same route tree.
         </p>
         <ul class="list-disc pl-6 space-y-2">
@@ -537,7 +596,7 @@ export function Routing() {
         <div class="code-block">
           <pre><code class="language-ts">import { html } from '@arrow-js/core'
 
-export function createPage(url: string) {
+export function routeToPage(url: string) {
   if (url === '/') {
     return {
       status: 200,

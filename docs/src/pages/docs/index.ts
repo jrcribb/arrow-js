@@ -8,7 +8,6 @@ import {
   ReactiveData,
   WatchingData,
   Templates,
-  ServerRendering,
   Routing,
   Examples,
 } from './content'
@@ -41,7 +40,7 @@ export function DocsPage() {
           </div>
 
           ${ReactiveData()} ${Templates()} ${Components()} ${WatchingData()}
-          ${ServerRendering()} ${Routing()} ${Examples()}
+          ${Routing()} ${Examples()}
         </article>
       </div>
     </div>

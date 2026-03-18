@@ -1,9 +1,9 @@
 import { hydrate, readPayload } from '@arrow-js/hydrate'
-import { createPage } from './page'
+import { routeToPage } from './page'
 import './style.css'
 
 const payload = readPayload()
-const page = createPage(window.location.pathname)
+const page = routeToPage(window.location.pathname)
 const root = document.getElementById(payload.rootId ?? 'app')
 
 if (!root) {

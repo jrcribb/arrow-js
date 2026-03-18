@@ -784,6 +784,11 @@ export function RenderToStringApi() {
           Renders a view to an HTML string on the server. Waits for all
           async components to resolve before returning.
         </p>
+        <p>
+          This is the main SSR entry point. Use it inside your request handler
+          after you have chosen the page and built the Arrow view for the
+          incoming URL.
+        </p>
 
         <h3
           class="text-lg font-semibold text-zinc-900 dark:text-white pt-4"
@@ -813,6 +818,33 @@ const { html, payload } = await renderToString(view)
 
 // Serialize payload for client-side hydration
 const script = serializePayload(payload)</code></pre>
+        </div>
+
+        <h3
+          class="text-lg font-semibold text-zinc-900 dark:text-white pt-4"
+        >
+          Typical server flow
+        </h3>
+        <div class="code-block">
+          <pre><code class="language-ts">import { renderToString, serializePayload } from '@arrow-js/ssr'
+
+export async function renderPage(url: string) {
+  const page = routeToPage(url)
+  const result = await renderToString(page.view)
+
+  return [
+    '&lt;!doctype html&gt;',
+    '&lt;html&gt;',
+    '  &lt;head&gt;',
+    \`    &lt;title&gt;\${page.title}&lt;/title&gt;\`,
+    '  &lt;/head&gt;',
+    '  &lt;body&gt;',
+    \`    &lt;div id="app"&gt;\${result.html}&lt;/div&gt;\`,
+    \`    \${serializePayload(result.payload)}\`,
+    '  &lt;/body&gt;',
+    '&lt;/html&gt;'
+  ].join('\\n')
+}</code></pre>
         </div>
 
         <p>
@@ -899,6 +931,10 @@ export function HydrateApi() {
           Reconciles server-rendered HTML with the client-side view tree,
           reconnecting reactivity without replacing existing DOM nodes.
         </p>
+        <p>
+          Call it once in your browser entry after reading the server payload
+          and rebuilding the same page view that was used during SSR.
+        </p>
 
         <h3
           class="text-lg font-semibold text-zinc-900 dark:text-white pt-4"
@@ -952,6 +988,28 @@ const result = await hydrate(root, createApp(), payload, {
     console.warn('Hydration mismatch:', details)
   }
 })</code></pre>
+        </div>
+
+        <h3
+          class="text-lg font-semibold text-zinc-900 dark:text-white pt-4"
+        >
+          Typical client flow
+        </h3>
+        <div class="code-block">
+          <pre><code class="language-ts">import { hydrate, readPayload } from '@arrow-js/hydrate'
+
+const payload = readPayload()
+const root = document.getElementById(payload.rootId ?? 'app')
+
+if (!root) {
+  throw new Error('Missing #app root')
+}
+
+await hydrate(
+  root,
+  routeToPage(window.location.pathname).view,
+  payload
+)</code></pre>
         </div>
 
         <p>

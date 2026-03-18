@@ -26,7 +26,7 @@ export function createApp() {
 
   server: `import { renderToString, serializePayload } from '@arrow-js/ssr'
 
-declare function createPage(url: string): {
+declare function routeToPage(url: string): {
   html?: string
   status: number
   title: string
@@ -34,7 +34,7 @@ declare function createPage(url: string): {
 }
 
 export async function renderPage(url: string) {
-  const page = createPage(url)
+  const page = routeToPage(url)
   const result = await renderToString(page.view)
 
   return {
@@ -47,7 +47,7 @@ export async function renderPage(url: string) {
 
   client: `import { hydrate, readPayload } from '@arrow-js/hydrate'
 
-declare function createPage(url: string): {
+declare function routeToPage(url: string): {
   view: unknown
 }
 
@@ -58,9 +58,10 @@ if (!root) {
   throw new Error('Missing #app root')
 }
 
-await hydrate(root, createPage(window.location.pathname).view, payload)`,
+await hydrate(root, routeToPage(window.location.pathname).view, payload)`,
 
   asyncComponent: `import { component, html } from '@arrow-js/core'
+import type { Props } from '@arrow-js/core'
 import { boundary } from '@arrow-js/framework'
 
 type User = {
@@ -68,7 +69,7 @@ type User = {
   name: string
 }
 
-const UserName = component(async ({ id }: { id: string }) => {
+const UserName = component(async ({ id }: Props<{ id: string }>) => {
   const user = await fetch(\`/api/users/\${id}\`).then(
     (r) => r.json() as Promise<User>
   )
@@ -76,7 +77,7 @@ const UserName = component(async ({ id }: { id: string }) => {
   return user.name
 })
 
-const UserCard = component((props: { id: string }) =>
+const UserCard = component((props: Props<{ id: string }>) =>
   html\`<article>\${UserName(props)}</article>\`
 )
 

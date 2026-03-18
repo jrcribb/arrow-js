@@ -15,7 +15,7 @@ const homePage = {
   title: 'Arrow App',
 }
 
-export function createPage(url: string): Page {
+export function routeToPage(url: string): Page {
   const pathname = new URL(url, 'http://arrow.local').pathname
 
   if (pathname === '/' || pathname === '') {

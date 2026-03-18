@@ -13,7 +13,6 @@ import {
   ReactiveData,
   WatchingData,
   Templates,
-  ServerRendering,
   Routing,
   Examples,
   WhyArrow,
@@ -34,7 +33,6 @@ const homeNavGroups: NavGroup[] = [
       { id: 'templates', label: 'Templates' },
       { id: 'components', label: 'Components' },
       { id: 'watching-data', label: 'Watching Data' },
-      { id: 'ssr', label: 'Server Rendering' },
       { id: 'routing', label: 'Routing' },
     ],
   },
@@ -64,8 +62,7 @@ export function HomePage() {
               ${CopyPageMenu({ markdownPath: '/docs.md' })}
             </div>
             ${WhyArrow()} ${Quickstart()} ${ReactiveData()} ${Templates()}
-            ${Components()} ${WatchingData()} ${ServerRendering()} ${Routing()}
-            ${Examples()}
+            ${Components()} ${WatchingData()} ${Routing()} ${Examples()}
           </article>
         </div>
       </div>

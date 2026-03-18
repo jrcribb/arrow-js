@@ -44,15 +44,7 @@ const navigation: NavGroup[] = [
       { id: 'templates', label: 'Templates' },
       { id: 'components', label: 'Components' },
       { id: 'watching-data', label: 'Watching Data' },
-      { id: 'ssr', label: 'Server Rendering' },
       { id: 'routing', label: 'Routing' },
-    ],
-  },
-  {
-    title: 'Framework',
-    items: [
-      { id: 'hydration', label: 'Hydration' },
-      { id: 'ecosystem', label: 'Ecosystem' },
     ],
   },
   {

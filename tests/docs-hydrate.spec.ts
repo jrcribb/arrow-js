@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { nextTick } from '@arrow-js/core'
 import { hydrate } from '@arrow-js/hydrate'
 import { renderToString } from '@arrow-js/ssr'
-import { createPage } from '../docs/src/app'
+import { routeToPage } from '../docs/src/app'
 import { renderPage } from '../docs/src/entry-server'
 
 describe('docs hydration', () => {
@@ -39,7 +39,7 @@ describe('docs hydration', () => {
   })
 
   it('renders the shared header controls in SSR output', async () => {
-    const page = createPage('/docs/')
+    const page = routeToPage('/docs/')
     const ssr = await renderToString(page.view)
 
     expect(ssr.html).toContain('aria-label="GitHub"')
@@ -64,14 +64,14 @@ describe('docs hydration', () => {
 
   it('repairs a missing home counter without replacing intact siblings', async () => {
     const root = document.createElement('div')
-    const serverPage = createPage('/')
+    const serverPage = routeToPage('/')
     const ssr = await renderToString(serverPage.view)
     root.innerHTML = ssr.html
 
     const existingHero = root.querySelector('#hero')
     root.querySelector('#hero-counter')?.remove()
 
-    const clientPage = createPage('/')
+    const clientPage = routeToPage('/')
     const result = await hydrate(root, clientPage.view, ssr.payload)
 
     expect(result.adopted).toBe(true)
@@ -88,12 +88,12 @@ describe('docs hydration', () => {
 
 async function hydratePage(path: string) {
   const root = document.createElement('div')
-  const serverPage = createPage(path)
+  const serverPage = routeToPage(path)
   const ssr = await renderToString(serverPage.view)
   root.innerHTML = ssr.html
 
   const existing = root.firstElementChild
-  const clientPage = createPage(path)
+  const clientPage = routeToPage(path)
   const result = await hydrate(root, clientPage.view, ssr.payload)
 
   return {

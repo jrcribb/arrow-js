@@ -1,7 +1,7 @@
 import { renderToString, serializePayload } from '@arrow-js/ssr'
-import { createPage } from './page'
+import { routeToPage } from './page'
 
-function renderHead(page: ReturnType<typeof createPage>) {
+function renderHead(page: ReturnType<typeof routeToPage>) {
   return [
     `<title>${page.title}</title>`,
     `<meta name="description" content="${page.description}" />`,
@@ -9,7 +9,7 @@ function renderHead(page: ReturnType<typeof createPage>) {
 }
 
 export async function renderPage(url: string) {
-  const page = createPage(url)
+  const page = routeToPage(url)
   const result = await renderToString(page.view)
 
   return {

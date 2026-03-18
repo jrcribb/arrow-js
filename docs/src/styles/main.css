@@ -493,6 +493,25 @@ section[id] {
   color: #e4e4e7;
 }
 
+/* Article lists */
+article ul,
+article ol {
+  padding-left: 1.5rem;
+  margin: 1rem 0;
+}
+
+article ul {
+  list-style: disc;
+}
+
+article ol {
+  list-style: decimal;
+}
+
+article li + li {
+  margin-top: 0.35rem;
+}
+
 /* Inline docs links */
 article :where(p, li, td, blockquote) a:not(.playground-cta) {
   text-decoration-line: underline;

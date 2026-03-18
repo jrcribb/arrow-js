@@ -1,5 +1,5 @@
 import { hydrate, readPayload } from '@arrow-js/hydrate'
-import { createPage } from './app'
+import { routeToPage } from './app'
 import highlight from './highlight'
 
 const payload = readPayload()
@@ -9,7 +9,7 @@ if (!root) {
   throw new Error('Unable to find hydration root "app".')
 }
 
-await hydrate(root, createPage(window.location.pathname).view, payload)
+await hydrate(root, routeToPage(window.location.pathname).view, payload)
 await highlight()
 
 // Fix twoslash popups: use position:fixed so they escape overflow:auto parents

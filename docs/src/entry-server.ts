@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderToString, serializePayload } from '@arrow-js/ssr'
-import { createPage } from './app'
+import { routeToPage } from './app'
 import { htmlToMarkdown } from './html-to-markdown'
 import {
   playgroundExampleMeta,
@@ -48,7 +48,7 @@ function renderHead(
 }
 
 export async function renderPage(url: string) {
-  const page = createPage(url)
+  const page = routeToPage(url)
   const result = await renderToString(page.view)
 
   return {
@@ -63,7 +63,7 @@ export async function renderPage(url: string) {
 }
 
 export async function renderMarkdown(url: string) {
-  const page = createPage(url)
+  const page = routeToPage(url)
   const result = await renderToString(page.view)
   return htmlToMarkdown(result.html)
 }

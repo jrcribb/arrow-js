@@ -16,15 +16,33 @@ function stripComments(source: string) {
     .trim()
 }
 
-function extractBlock(source: string, signature: string) {
-  const start = source.indexOf(signature)
+function extractBlock(source: string, signature: string | string[]) {
+  const signatures = Array.isArray(signature) ? signature : [signature]
+  let start = -1
+  let matched = ''
+
+  for (const candidate of signatures) {
+    start = source.indexOf(candidate)
+    if (start !== -1) {
+      matched = candidate
+      break
+    }
+  }
 
   if (start === -1) {
-    throw new Error(`Unable to find declaration starting with: ${signature}`)
+    throw new Error(
+      `Unable to find declaration starting with: ${signatures[0]}`
+    )
   }
 
   const end = source.indexOf('\n\n', start)
-  return stripComments(source.slice(start, end === -1 ? source.length : end))
+  let block = stripComments(source.slice(start, end === -1 ? source.length : end))
+
+  if (matched.startsWith('type ') && signatures[0].startsWith('export type ')) {
+    block = block.replace(/^type\s/, 'export type ')
+  }
+
+  return block
 }
 
 function joinBlocks(...blocks: string[]) {
@@ -34,7 +52,10 @@ function joinBlocks(...blocks: string[]) {
 export const coreTypeReferenceSnippet = joinBlocks(
   extractBlock(coreHtmlSource, 'export type ParentNode ='),
   extractBlock(coreHtmlSource, 'export interface ArrowTemplate {'),
-  extractBlock(coreHtmlSource, 'export type ArrowTemplateKey ='),
+  extractBlock(coreHtmlSource, [
+    'export type ArrowTemplateKey =',
+    'type ArrowTemplateKey =',
+  ]),
   extractBlock(coreHtmlSource, 'export type ArrowRenderable ='),
   extractBlock(coreHtmlSource, 'export type ArrowFunction ='),
   extractBlock(coreHtmlSource, 'export type ArrowExpression ='),

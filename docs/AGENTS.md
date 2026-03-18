@@ -311,10 +311,10 @@ This site uses a standard Arrow SSR flow:
 
 ```ts
 import { renderToString, serializePayload } from '@arrow-js/ssr'
-import { createPage } from './app'
+import { routeToPage } from './app'
 
 export async function renderPage(url: string) {
-  const page = createPage(url)
+  const page = routeToPage(url)
   const result = await renderToString(page.view)
 
   return {
@@ -333,12 +333,12 @@ export async function renderPage(url: string) {
 
 ```ts
 import { hydrate, readPayload } from '@arrow-js/hydrate'
-import { createPage } from './app'
+import { routeToPage } from './app'
 
 const payload = readPayload()
 const root = document.getElementById('app')!
 
-await hydrate(root, createPage(window.location.pathname).view, payload)
+await hydrate(root, routeToPage(window.location.pathname).view, payload)
 ```
 
 ### How it works
