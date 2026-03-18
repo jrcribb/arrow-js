@@ -94,10 +94,13 @@ function frameworkDir(keyed) {
 function createArrowMainSource(keyed) {
   const title = keyed ? 'Arrowjs (keyed)' : 'Arrowjs (Non-keyed)'
   const rows = keyed
-    ? `() =>
-        data.items.map((row) => {
+    ? `() => {
+        const items = data.items
+        const rows = new Array(items.length)
+        for (let i = 0; i < items.length; i++) {
+          const row = items[i]
           const id = row.id
-          return html\`<tr class="\${() => data.selected === id ? 'danger' : ''}">
+          rows[i] = html\`<tr class="\${() => data.selected === id ? 'danger' : ''}">
             <td class="col-md-1">\${id}</td>
             <td class="col-md-4">
               <a @click="\${() => select(id)}">\${() => row.label}</a>
@@ -109,11 +112,16 @@ function createArrowMainSource(keyed) {
             </td>
             <td class="col-md-6"/>
           </tr>\`.key(id).id(id)
-        })`
-    : `() =>
-        data.items.map((row) => {
+        }
+        return rows
+      }`
+    : `() => {
+        const items = data.items
+        const rows = new Array(items.length)
+        for (let i = 0; i < items.length; i++) {
+          const row = items[i]
           const id = row.id
-          return html\`<tr class="\${() => data.selected === id ? 'danger' : ''}">
+          rows[i] = html\`<tr class="\${() => data.selected === id ? 'danger' : ''}">
             <td class="col-md-1">\${id}</td>
             <td class="col-md-4">
               <a @click="\${() => select(id)}">\${() => row.label}</a>
@@ -125,7 +133,9 @@ function createArrowMainSource(keyed) {
             </td>
             <td class="col-md-6"/>
           </tr>\`.id(id)
-        })`
+        }
+        return rows
+      }`
   return `import { reactive, html } from './arrow.js';
 let data = reactive({
   items: [],
