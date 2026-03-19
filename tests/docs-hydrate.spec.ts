@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { nextTick } from '@arrow-js/core'
 import { hydrate } from '@arrow-js/hydrate'
 import { renderToString } from '@arrow-js/ssr'
 import { routeToPage } from '../docs/src/app'
@@ -10,9 +9,9 @@ describe('docs hydration', () => {
     const docs = await renderPage('/docs/?ref=test')
     const api = await renderPage('/api?ref=test')
 
-    expect(docs.head).toContain('<link rel="canonical" href="https://arrow-js.com/" />')
-    expect(docs.head).toContain('<meta property="og:url" content="https://arrow-js.com/" />')
-    expect(docs.head).toContain('<meta property="og:title" content="Arrow')
+    expect(docs.head).toContain('<link rel="canonical" href="https://arrow-js.com/docs" />')
+    expect(docs.head).toContain('<meta property="og:url" content="https://arrow-js.com/docs" />')
+    expect(docs.head).toContain('<meta property="og:title" content="Documentation — Arrow" />')
     expect(docs.head).toContain(
       '<meta property="og:image" content="https://arrow-js.com/arrow-js-og-meta.webp" />'
     )
@@ -24,7 +23,7 @@ describe('docs hydration', () => {
       '<meta name="twitter:image" content="https://arrow-js.com/arrow-js-og-meta.webp" />'
     )
     expect(docs.head).toContain(
-      '<meta name="twitter:description" content="A ~5KB runtime with zero dependencies. Observable data, declarative DOM, and SSR built on platform primitives." />'
+      '<meta name="twitter:description" content="Guides for ArrowJS fundamentals including reactive state, templates, components, routing, and sandboxed execution." />'
     )
 
     expect(api.head).toContain('<link rel="canonical" href="https://arrow-js.com/api" />')
@@ -62,14 +61,14 @@ describe('docs hydration', () => {
     expect(root.firstElementChild).toBe(existing)
   })
 
-  it('repairs a missing home counter without replacing intact siblings', async () => {
+  it('repairs a missing home cli command without replacing intact siblings', async () => {
     const root = document.createElement('div')
     const serverPage = await routeToPage('/')
     const ssr = await renderToString(serverPage.view)
     root.innerHTML = ssr.html
 
     const existingHero = root.querySelector('#hero')
-    root.querySelector('#hero-counter')?.remove()
+    root.querySelector('.cli-command')?.remove()
 
     const clientPage = await routeToPage('/')
     const result = await hydrate(root, clientPage.view, ssr.payload)
@@ -77,12 +76,8 @@ describe('docs hydration', () => {
     expect(result.adopted).toBe(true)
     expect(result.mismatches).toBeGreaterThan(0)
     expect(root.querySelector('#hero')).toBe(existingHero)
-    expect(root.querySelector('#hero-counter')?.textContent).toContain('Clicked 0 times')
-
-    ;(root.querySelector('#hero-counter') as HTMLButtonElement).click()
-    await nextTick()
-
-    expect(root.querySelector('#hero-counter')?.textContent).toContain('Clicked 1 times')
+    expect(root.querySelector('.cli-command')?.textContent).toContain('pnpm')
+    expect(root.querySelector('.cli-command code')?.textContent).toContain('arrow-js@latest')
   })
 })
 

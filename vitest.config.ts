@@ -57,6 +57,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['packages/**/*.spec.ts', 'tests/**/*.spec.ts'],
-    exclude: ['tests/e2e/**', '**/node_modules/**'],
+    exclude: ['tests/e2e/**', 'tests/sandbox-e2e/**', '**/node_modules/**'],
   },
 })

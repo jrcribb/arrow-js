@@ -510,6 +510,7 @@ export const CocktailScaler = component(() => {
 const races = ['Human', 'Elf', 'Dwarf', 'Halfling', 'Dragonborn', 'Tiefling']
 const classes = ['Fighter', 'Wizard', 'Rogue', 'Cleric', 'Ranger', 'Bard']
 const abilityNames = ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA'] as const
+type AbilityName = typeof abilityNames[number]
 
 const raceBonuses: Record<string, Record<string, number>> = {
   Human: { STR: 1, DEX: 1, CON: 1, INT: 1, WIS: 1, CHA: 1 },
@@ -544,15 +545,15 @@ export const DndCreator = component(() => {
     return abilityNames.reduce((sum, a) => sum + pointCost(st.scores[a]), 0)
   }
 
-  function canInc(a: string): boolean {
+  function canInc(a: AbilityName): boolean {
     return st.scores[a] < 15 && spent() < st.budget
   }
 
-  function canDec(a: string): boolean {
+  function canDec(a: AbilityName): boolean {
     return st.scores[a] > 8
   }
 
-  function totalScore(a: string): number {
+  function totalScore(a: AbilityName): number {
     return st.scores[a] + (raceBonuses[st.race]?.[a] || 0)
   }
 
@@ -680,18 +681,22 @@ export const MapSearch = component(() => {
   function initMap() {
     if (typeof window === 'undefined') return
     loadLeaflet().then(() => {
-      const L = (window as Record<string, unknown>).L as {
+      const L = (window as unknown as { L: {
         map: (id: string, opts?: Record<string, unknown>) => {
           setView: (c: [number, number], z: number) => unknown
           invalidateSize: () => void
         }
         tileLayer: (url: string, opts?: Record<string, unknown>) => { addTo: (m: unknown) => void }
         circleMarker: (c: [number, number], opts?: Record<string, unknown>) => {
-          addTo: (m: unknown) => void
+          addTo: (m: unknown) => {
+            bindPopup: (s: string) => {
+              on: (e: string, fn: () => void) => unknown
+            }
+          }
           bindPopup: (s: string) => unknown
           on: (e: string, fn: () => void) => unknown
         }
-      }
+      } }).L
       const el = document.getElementById(mapId)
       if (!el || mapInstance) return
       const map = L.map(mapId, { zoomControl: false, attributionControl: false })

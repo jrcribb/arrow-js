@@ -33,7 +33,7 @@ export function HomePage(
 
   return html`
     <div>
-      ${Hero({ highlightCode })}
+      ${Hero()}
       <div id="home-mobile-nav-root">${nav.mobile()}</div>
 
       <div class="max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-12">
