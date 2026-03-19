@@ -169,6 +169,93 @@ describe('@arrow-js/sandbox', () => {
     instance.destroy()
   })
 
+  it('exposes event.target and event.currentTarget snapshots for form handlers', async () => {
+    const root = document.createElement('div')
+
+    const instance = await sandbox(
+      `
+        const state = reactive({
+          current: '',
+          fieldId: '',
+          tagName: '',
+          value: '',
+        })
+
+        export default html\`
+          <div>
+            <input
+              id="city-input"
+              data-kind="city"
+              @input="\${(event) => {
+                state.value = event.target?.value ?? ''
+                state.current = event.currentTarget?.value ?? ''
+                state.fieldId = event.currentTarget?.id ?? ''
+                state.tagName = event.target?.tagName ?? ''
+              }}"
+            />
+            <output>\${() =>
+              [
+                state.value,
+                state.current,
+                state.fieldId,
+                state.tagName,
+              ].join('|')}</output>
+          </div>
+        \`
+      `,
+      root
+    )
+
+    const input = root.querySelector('input') as HTMLInputElement
+    input.value = 'Boston'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await waitForSandbox()
+
+    expect(root.querySelector('output')?.textContent).toBe(
+      'Boston|Boston|city-input|input'
+    )
+    instance.destroy()
+  })
+
+  it('exposes checked on sanitized change events without leaking DOM nodes', async () => {
+    const root = document.createElement('div')
+
+    const instance = await sandbox(
+      `
+        const state = reactive({
+          checked: 'no',
+          fieldId: '',
+          tagName: '',
+        })
+
+        export default html\`
+          <label>
+            <input
+              id="terms"
+              type="checkbox"
+              @change="\${(event) => {
+                state.checked = event.target?.checked ? 'yes' : 'no'
+                state.fieldId = event.currentTarget?.id ?? ''
+                state.tagName = event.target?.tagName ?? ''
+              }}"
+            />
+            <output>\${() =>
+              [state.checked, state.fieldId, state.tagName].join('|')}</output>
+          </label>
+        \`
+      `,
+      root
+    )
+
+    const input = root.querySelector('input') as HTMLInputElement
+    input.checked = true
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    await waitForSandbox()
+
+    expect(root.querySelector('output')?.textContent).toBe('yes|terms|input')
+    instance.destroy()
+  })
+
   it('supports sandboxed setTimeout callbacks', async () => {
     vi.useFakeTimers()
 

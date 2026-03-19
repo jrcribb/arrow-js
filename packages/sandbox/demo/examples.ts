@@ -179,7 +179,10 @@ const WeatherExplorer = component(() => {
           <select
             class="weather-select"
             @change="\${(event) => {
-              state.selectedId = event.value ?? state.selectedId
+              state.selectedId =
+                event.target?.value ??
+                event.currentTarget?.value ??
+                state.selectedId
               void loadWeather()
             }}"
           >

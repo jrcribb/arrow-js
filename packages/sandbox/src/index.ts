@@ -6,6 +6,7 @@ export type {
 export type {
   HostToVmMessage,
   SandboxedEventPayload,
+  SandboxedEventTargetSnapshot,
   SerializedNode,
   TemplateDescriptor,
   VmPatch,

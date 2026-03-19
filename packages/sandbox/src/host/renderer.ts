@@ -1,5 +1,6 @@
 import type {
   SandboxedEventPayload,
+  SandboxedEventTargetSnapshot,
   SerializedNode,
   VmPatch,
 } from '../shared/protocol'
@@ -239,7 +240,7 @@ export class HostRenderer {
         if (handlerId) {
           await this.onEvent(
             handlerId,
-            this.sanitizeEvent(event, currentId, targetId)
+            this.sanitizeEvent(event, current, currentId, target, targetId)
           )
         }
       }
@@ -251,10 +252,11 @@ export class HostRenderer {
 
   private sanitizeEvent(
     event: Event,
+    currentTargetNode: Node,
     currentTargetId: string,
+    targetNode: Node | null,
     targetId?: string
   ): SandboxedEventPayload {
-    const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null
     const mouseEvent = event as MouseEvent
     const keyboardEvent = event as KeyboardEvent
     const modifierEvent = event as Event & {
@@ -263,19 +265,21 @@ export class HostRenderer {
       metaKey?: boolean
       shiftKey?: boolean
     }
+    const currentTargetSnapshot = this.snapshotEventNode(
+      currentTargetNode,
+      currentTargetId
+    )
+    const targetSnapshot = this.snapshotEventNode(targetNode, targetId)
 
     return {
       type: event.type,
       currentTargetId,
       targetId,
-      value:
-        target && 'value' in target && typeof target.value === 'string'
-          ? target.value
-          : undefined,
-      checked:
-        target && 'checked' in target && typeof target.checked === 'boolean'
-          ? target.checked
-          : undefined,
+      currentTarget: currentTargetSnapshot,
+      target: targetSnapshot,
+      srcElement: targetSnapshot,
+      value: targetSnapshot?.value ?? currentTargetSnapshot?.value,
+      checked: targetSnapshot?.checked ?? currentTargetSnapshot?.checked,
       key: 'key' in keyboardEvent ? keyboardEvent.key : undefined,
       clientX: 'clientX' in mouseEvent ? mouseEvent.clientX : undefined,
       clientY: 'clientY' in mouseEvent ? mouseEvent.clientY : undefined,
@@ -285,5 +289,42 @@ export class HostRenderer {
       metaKey: modifierEvent.metaKey,
       shiftKey: modifierEvent.shiftKey,
     }
+  }
+
+  private snapshotEventNode(
+    node: Node | null,
+    _fallbackNodeId?: string
+  ): SandboxedEventTargetSnapshot | undefined {
+    const element = this.findElement(node)
+    if (!element) return undefined
+
+    const snapshotTarget = element as Element & {
+      checked?: unknown
+      value?: unknown
+    }
+
+    return {
+      tagName: element.tagName.toLowerCase(),
+      id: element.id || undefined,
+      value:
+        typeof snapshotTarget.value === 'string'
+          ? snapshotTarget.value
+          : undefined,
+      checked:
+        typeof snapshotTarget.checked === 'boolean'
+          ? snapshotTarget.checked
+          : undefined,
+    }
+  }
+
+  private findElement(node: Node | null): Element | null {
+    let current = node
+
+    while (current) {
+      if (current instanceof Element) return current
+      current = current.parentNode
+    }
+
+    return null
   }
 }

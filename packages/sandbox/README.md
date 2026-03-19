@@ -105,10 +105,20 @@ export function sandbox(
 - The sandbox does not receive direct access to `window`, `document`, DOM nodes, storage, or arbitrary browser APIs.
 - `html` templates are preprocessed into descriptors. The host never evaluates user expressions.
 - DOM listeners in the host never attach raw user callbacks from sandbox code.
+- Synthetic sandbox events preserve common access patterns such as
+  `event.target.value` and `event.currentTarget.checked` without exposing live
+  host DOM nodes.
 
 Explicitly bridged globals currently include `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, and a restricted `fetch()` proxy. The host owns the real timers and networking, but the registered callbacks and response handling still execute inside QuickJS.
 
-Event payloads are forwarded as plain data. The VM receives a narrow snapshot, not a live DOM event object.
+Event payloads are forwarded as plain data. The VM receives a narrow snapshot,
+not a live DOM event object.
+
+The sandbox exposes `event.target`, `event.currentTarget`, and
+`event.srcElement` as plain data snapshots with a deliberately small surface:
+`value`, `checked`, `id`, and `tagName`. Compatibility shortcuts such as
+`event.value` and `event.checked` are still present, but `event.target.value`
+is the preferred shape.
 
 ### Sandboxed fetch
 

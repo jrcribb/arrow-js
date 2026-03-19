@@ -26,10 +26,20 @@ export type SandboxConsoleMethod =
   | 'trace'
   | 'warn'
 
+export interface SandboxedEventTargetSnapshot {
+  tagName?: string
+  id?: string
+  value?: string
+  checked?: boolean
+}
+
 export interface SandboxedEventPayload {
   type: string
   currentTargetId: string
   targetId?: string
+  currentTarget?: SandboxedEventTargetSnapshot
+  target?: SandboxedEventTargetSnapshot
+  srcElement?: SandboxedEventTargetSnapshot
   value?: string
   checked?: boolean
   key?: string
