@@ -39,7 +39,7 @@ export function WhyArrow() {
            Unlike other major frameworks, there is no "idomatic" way to use Arrow since it's just TypeScript functions and template literals. The entire documentation fits in less than 5% of a 200k context window.
         </p>
         <p>
-          Arrow requires no build step, no JSX compilation, no React compiler, no Vite plugin (there is one if you need SSR), no Vue template complier, and yet it runs incredibly fast at with less than 5kb over the wire. When coupled with the <a href="#sandbox" class="text-arrow-600 dark:text-arrow-400 underline underline-offset-2">Arrow sandbox</a>, it's perfect for interfaces produced by chat agents too.
+          Arrow requires no build step, no JSX compilation, no React compiler, no Vite plugin (there is one if you need SSR), no Vue template complier, and yet it runs incredibly fast at less than 5kb over the wire. When coupled with the <a href="#sandbox" class="text-arrow-600 dark:text-arrow-400 underline underline-offset-2">Arrow sandbox</a>, it's perfect for interfaces produced by chat agents too.
         </p>
       </div>
     </section>

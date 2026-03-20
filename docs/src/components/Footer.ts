@@ -9,7 +9,7 @@ export function Footer() {
         <p>
           Built by
           <a
-            href="https://standardagents.com"
+            href="https://standardagents.ai"
             class="text-zinc-700 dark:text-zinc-300 underline decoration-current underline-offset-2 hover:text-arrow-500 transition-colors"
             target="_blank"
             rel="noopener"
