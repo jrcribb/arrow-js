@@ -1,6 +1,7 @@
 import { layout } from './layout'
 
 const defaultSiteUrl = 'https://arrow-js.com'
+const defaultOgImageUrl = 'https://assets.arrow-js.com/og.webp'
 
 export interface DocsPage {
   title: string
@@ -36,7 +37,7 @@ async function createApiPage(
     description:
       'Comprehensive API reference for every ArrowJS export across @arrow-js/core, framework, ssr, hydrate, and sandbox.',
     canonicalUrl: `${siteUrl}/api`,
-    imageUrl: `${siteUrl}/arrow-js-og-meta.webp`,
+    imageUrl: defaultOgImageUrl,
     imageAlt: defaultImageAlt,
     ogType: 'website' as const,
     view: layout(ApiPage(options), url),
@@ -55,7 +56,7 @@ async function createHomePageWithOptions(
     description:
       'A tiny, blazing-fast, zero-dependency, type-safe framework. No build step required. Isolate agent-generated UI inside WebAssembly sandboxes while rendering full inline DOM directly in your app — no iframes, no pre-defined components.',
     canonicalUrl: `${siteUrl}/`,
-    imageUrl: `${siteUrl}/arrow-js-og-meta.webp`,
+    imageUrl: defaultOgImageUrl,
     imageAlt: defaultImageAlt,
     ogType: 'website' as const,
     view: layout(HomePage(options), url),
