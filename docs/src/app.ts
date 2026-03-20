@@ -1,6 +1,6 @@
 import { layout } from './layout'
 
-const siteUrl = 'https://arrow-js.com'
+const defaultSiteUrl = 'https://arrow-js.com'
 
 export interface DocsPage {
   title: string
@@ -13,25 +13,30 @@ export interface DocsPage {
 }
 
 function normalizePath(url: string) {
-  return new URL(url, siteUrl).pathname.replace(/\/+$/, '') || '/'
+  return new URL(url, defaultSiteUrl).pathname.replace(/\/+$/, '') || '/'
 }
 
-const defaultImageUrl = `${siteUrl}/arrow-js-og-meta.webp`
 const defaultImageAlt =
-  'ArrowJS logo on a light grid background with the text: A tiny (~5KB), blazing-fast, type-safe reactive framework. Zero dependencies and no build step required.'
+  'ArrowJS logo on a light grid background with the text: A tiny, blazing-fast, type-safe reactive framework with WASM sandboxing for safe AI-generated UIs.'
+
+interface CreatePageOptions {
+  highlightCode?: boolean
+  baseUrl?: string
+}
 
 async function createApiPage(
   url: string,
-  options: { highlightCode?: boolean } = {}
+  options: CreatePageOptions = {}
 ): Promise<DocsPage> {
   const { ApiPage } = await import('./pages/api/index')
+  const siteUrl = options.baseUrl || defaultSiteUrl
 
   return {
-    title: 'API Reference — Arrow',
+    title: 'API Reference — ArrowJS',
     description:
-      'Comprehensive API reference for every ArrowJS export across @arrow-js/core, framework, ssr, and hydrate.',
+      'Comprehensive API reference for every ArrowJS export across @arrow-js/core, framework, ssr, hydrate, and sandbox.',
     canonicalUrl: `${siteUrl}/api`,
-    imageUrl: defaultImageUrl,
+    imageUrl: `${siteUrl}/arrow-js-og-meta.webp`,
     imageAlt: defaultImageAlt,
     ogType: 'website' as const,
     view: layout(ApiPage(options), url),
@@ -40,16 +45,17 @@ async function createApiPage(
 
 async function createHomePageWithOptions(
   url: string,
-  options: { highlightCode?: boolean } = {}
+  options: CreatePageOptions = {}
 ): Promise<DocsPage> {
   const { HomePage } = await import('./pages/home/index')
+  const siteUrl = options.baseUrl || defaultSiteUrl
 
   return {
-    title: 'ArrowJS — Reactive interfaces in pure JavaScript',
+    title: 'ArrowJS — The first UI framework for the agentic era',
     description:
-      'A ~5KB runtime with zero dependencies. Observable data, declarative DOM, and SSR built on platform primitives.',
+      'A tiny, blazing-fast, zero-dependency, type-safe framework. No build step required. Isolate agent-generated UI inside WebAssembly sandboxes while rendering full inline DOM directly in your app — no iframes, no pre-defined components.',
     canonicalUrl: `${siteUrl}/`,
-    imageUrl: defaultImageUrl,
+    imageUrl: `${siteUrl}/arrow-js-og-meta.webp`,
     imageAlt: defaultImageAlt,
     ogType: 'website' as const,
     view: layout(HomePage(options), url),
@@ -58,7 +64,7 @@ async function createHomePageWithOptions(
 
 export async function createPage(
   url: string,
-  options: { highlightCode?: boolean } = {}
+  options: CreatePageOptions = {}
 ): Promise<DocsPage> {
   const path = normalizePath(url)
   if (path === '/api') return createApiPage(url, options)
