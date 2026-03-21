@@ -22,6 +22,22 @@ interface AssetBinding {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>
 }
 
+interface HtmlRewriterElement {
+  setAttribute(name: string, value: string): void
+}
+
+interface HtmlRewriter {
+  on(
+    selector: string,
+    handlers: { element(element: HtmlRewriterElement): void }
+  ): HtmlRewriter
+  transform(response: Response): Response
+}
+
+declare const HTMLRewriter: {
+  new (): HtmlRewriter
+}
+
 const HASH_LENGTH = 32
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
