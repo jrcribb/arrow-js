@@ -794,6 +794,226 @@ article :where(p, li, td, blockquote) a:not(.playground-cta):is(:hover, :focus-v
   color: #3b82f6;
 }
 
+/* ---------------------------------------------------------------------------
+   Standard Agents signup callout
+   --------------------------------------------------------------------------- */
+.sa-callout {
+  margin: 2.5rem 0 0;
+  border-radius: 0.75rem;
+  border: 1px solid;
+  overflow: hidden;
+}
+
+[data-theme="light"] .sa-callout {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #fafafa;
+}
+
+[data-theme="dark"] .sa-callout {
+  border-color: rgba(255, 255, 255, 0.06);
+  background: #141416;
+}
+
+.sa-callout-inner {
+  padding: 1.75rem;
+  background:
+    radial-gradient(ellipse at 80% 0%, rgba(255, 176, 0, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse at 10% 100%, rgba(255, 176, 0, 0.04) 0%, transparent 60%);
+}
+
+.sa-callout-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.sa-logo-link {
+  display: inline-flex;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.sa-logo-link:hover {
+  opacity: 0.7;
+}
+
+.sa-callout .sa-logo {
+  height: 1.25rem;
+  width: auto;
+}
+
+[data-theme="light"] .sa-callout .sa-logo {
+  color: #18181b;
+}
+
+[data-theme="dark"] .sa-callout .sa-logo {
+  color: #fafafa;
+}
+
+.sa-callout-badge {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+}
+
+[data-theme="light"] .sa-callout-badge {
+  color: var(--color-arrow-700);
+  background: rgba(255, 176, 0, 0.12);
+  border: 1px solid rgba(255, 176, 0, 0.25);
+}
+
+[data-theme="dark"] .sa-callout-badge {
+  color: var(--color-arrow-400);
+  background: rgba(255, 176, 0, 0.1);
+  border: 1px solid rgba(255, 176, 0, 0.2);
+}
+
+.sa-callout-desc {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+[data-theme="light"] .sa-callout-desc {
+  color: #52525b;
+}
+
+[data-theme="dark"] .sa-callout-desc {
+  color: #a1a1aa;
+}
+
+.sa-callout-desc a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.2s, text-decoration-color 0.2s;
+}
+
+[data-theme="light"] .sa-callout-desc a {
+  color: #18181b;
+  text-decoration-color: #d4d4d8;
+}
+
+[data-theme="dark"] .sa-callout-desc a {
+  color: #e4e4e7;
+  text-decoration-color: #3f3f46;
+}
+
+.sa-callout-desc a:hover {
+  color: var(--color-arrow-500);
+  text-decoration-color: var(--color-arrow-500);
+}
+
+.sa-callout-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sa-callout-input {
+  flex: 1;
+  height: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
+  font-family: inherit;
+  font-size: 0.84rem;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+[data-theme="light"] .sa-callout-input {
+  background: #fff;
+  border-color: #e4e4e7;
+  color: #18181b;
+}
+
+[data-theme="dark"] .sa-callout-input {
+  background: #1c1c1f;
+  border-color: #27272a;
+  color: #fafafa;
+}
+
+.sa-callout-input::placeholder {
+  color: #a1a1aa;
+}
+
+[data-theme="dark"] .sa-callout-input::placeholder {
+  color: #52525b;
+}
+
+.sa-callout-input:focus {
+  border-color: var(--color-arrow-500);
+}
+
+.sa-callout-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2.25rem;
+  padding: 0 1rem;
+  min-width: 10rem;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--color-arrow-500);
+  color: #18181b;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.sa-callout-submit:hover {
+  background: var(--color-arrow-400);
+}
+
+.sa-callout-submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+@keyframes sa-spin {
+  to { transform: rotate(360deg); }
+}
+
+.sa-callout .sa-spinner {
+  animation: sa-spin 0.6s linear infinite;
+}
+
+.sa-callout-error {
+  font-size: 0.8125rem;
+  color: #f87171;
+  margin: 0.5rem 0 0;
+}
+
+.sa-callout-success {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.875rem;
+  color: #22c55e;
+}
+
+.sa-hidden {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  .sa-callout-inner {
+    padding: 1.25rem;
+  }
+  .sa-callout-form {
+    flex-direction: column;
+  }
+}
+
 /* External link icon in nav */
 .nav-link-external::after {
   content: "";

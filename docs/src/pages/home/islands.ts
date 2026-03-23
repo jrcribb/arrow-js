@@ -1,6 +1,7 @@
 import { ScrollSpyNav } from '../../components/ScrollSpyNav'
 import { CopyPageMenu } from '../../components/CopyPageMenu'
 import { CliCommand, resolveCliCommandProps } from '../../components/CliCommand'
+import { SignupCallout } from '../../components/SignupCallout'
 import { hydrateEachIsland, hydrateIntoRoot } from '../../islands'
 import { homeNavGroups } from './nav'
 import { HeroChat } from './Hero'
@@ -17,5 +18,8 @@ export async function hydrateHomeIslands() {
   )
   await hydrateEachIsland('[data-island="copy-page-menu"]', (root) =>
     CopyPageMenu({ markdownPath: root.dataset.markdownPath || '/docs.md' })
+  )
+  await hydrateEachIsland('[data-island="signup-callout"]', () =>
+    SignupCallout()
   )
 }

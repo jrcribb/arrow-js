@@ -1,11 +1,27 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createServer as createViteServer } from 'vite'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// Load .env if present (Node 22 compatible, no dependencies)
+try {
+  const envPath = path.resolve(__dirname, '.env')
+  const envContent = readFileSync(envPath, 'utf8')
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eqIndex = trimmed.indexOf('=')
+    if (eqIndex === -1) continue
+    const key = trimmed.slice(0, eqIndex)
+    const value = trimmed.slice(eqIndex + 1)
+    if (!process.env[key]) process.env[key] = value
+  }
+} catch {}
 const isProduction = process.env.NODE_ENV === 'production'
 const port = Number(process.env.PORT ?? 4174)
 
@@ -50,6 +66,9 @@ const server = http.createServer(async (request, response) => {
 
     const playApiResult = await handlePlayApi(url, request, response)
     if (playApiResult) return
+
+    const earlyAccessResult = await handleEarlyAccess(url, request, response)
+    if (earlyAccessResult) return
 
     const textRoute = resolveTextRoute(url)
     if (textRoute) {
@@ -240,6 +259,56 @@ async function handlePlayApi(url, request, response) {
 }
 
 loadPlayStore()
+
+const WAITLIST_API = 'https://agents.standardagentbuilder.com/api/waitlist'
+const WAITLIST_API_TOKEN = process.env.WAITLIST_API_TOKEN || ''
+
+async function handleEarlyAccess(url, request, response) {
+  const target = new URL(url, 'http://arrow.local')
+  if (request.method !== 'POST' || target.pathname !== '/api/early-access') {
+    return false
+  }
+
+  try {
+    const body = JSON.parse(await readBody(request))
+    if (!body?.name || !body?.email) {
+      response.writeHead(400, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: 'Name and email required' }))
+      return true
+    }
+
+    if (!WAITLIST_API_TOKEN) {
+      console.error('[early-access] WAITLIST_API_TOKEN not set in .env')
+      response.writeHead(500, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: 'Server misconfigured' }))
+      return true
+    }
+
+    const res = await fetch(WAITLIST_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${WAITLIST_API_TOKEN}`,
+      },
+      body: JSON.stringify({ email: body.email, name: body.name, source: 'arrowjs-docs' }),
+    })
+
+    if (!res.ok) {
+      console.error(`[early-access] upstream status=${res.status}`)
+      response.writeHead(502, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({ error: 'Waitlist API error' }))
+      return true
+    }
+
+    response.writeHead(200, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ ok: true }))
+  } catch (err) {
+    console.error('[early-access] error:', err)
+    response.writeHead(500, { 'Content-Type': 'application/json' })
+    response.end(JSON.stringify({ error: 'Failed to submit' }))
+  }
+  return true
+}
 
 async function resolveStaticFile(url) {
   const pathname = new URL(url, 'http://arrow.local').pathname

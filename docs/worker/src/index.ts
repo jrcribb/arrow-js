@@ -10,6 +10,7 @@
 
 export interface Env {
   PLAY_KV: PlayKvNamespace
+  WAITLIST_API_TOKEN: string
   ASSETS?: AssetBinding
 }
 
@@ -38,6 +39,7 @@ declare const HTMLRewriter: {
   new (): HtmlRewriter
 }
 
+const WAITLIST_API = 'https://agents.standardagentbuilder.com/api/waitlist'
 const HASH_LENGTH = 32
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -96,6 +98,49 @@ async function handleLoad(
   }
 
   return Response.json({ snapshot }, { headers: CORS_HEADERS })
+}
+
+async function handleEarlyAccess(
+  request: Request,
+  env: Env,
+): Promise<Response> {
+  try {
+    const body = await request.json() as { name?: string; email?: string }
+    if (!body?.name || !body?.email) {
+      return Response.json(
+        { error: 'Name and email required' },
+        { status: 400 },
+      )
+    }
+
+    if (!env.WAITLIST_API_TOKEN) {
+      console.error('[early-access] WAITLIST_API_TOKEN is not set')
+      return Response.json({ error: 'Server misconfigured' }, { status: 500 })
+    }
+
+    const res = await fetch(WAITLIST_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.WAITLIST_API_TOKEN}`,
+      },
+      body: JSON.stringify({
+        email: body.email,
+        name: body.name,
+        source: 'arrowjs-docs',
+      }),
+    })
+
+    if (!res.ok) {
+      console.error(`[early-access] upstream status=${res.status}`)
+      return Response.json({ error: 'Waitlist API error' }, { status: 502 })
+    }
+
+    return Response.json({ ok: true })
+  } catch (err) {
+    console.error('[early-access] error:', err)
+    return Response.json({ error: 'Failed to submit' }, { status: 500 })
+  }
 }
 
 function redirectHtmlEntry(request: Request): Response | null {
@@ -169,6 +214,10 @@ export default {
 
     if (request.method === 'POST' && url.pathname === '/api/play') {
       return handleSave(request, env)
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/early-access') {
+      return handleEarlyAccess(request, env)
     }
 
     const loadMatch = url.pathname.match(/^\/api\/play\/([a-f0-9]+)$/)

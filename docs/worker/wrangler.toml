@@ -4,6 +4,7 @@ compatibility_date = "2024-12-01"
 
 routes = [
   { pattern = "arrow-js.com/api/play*", zone_name = "arrow-js.com" },
+  { pattern = "arrow-js.com/api/early-access", zone_name = "arrow-js.com" },
 ]
 
 [[kv_namespaces]]

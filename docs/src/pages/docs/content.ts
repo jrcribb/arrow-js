@@ -9,6 +9,7 @@ import { CliCommandIsland } from '../../components/CliCommand'
 import { CopyableSnippet } from '../../components/CopyableSnippet'
 import { TsCodeBlock } from '../../components/TsCodeBlock'
 import { highlightedSection } from '../../components/highlighted-section'
+import { SignupCalloutIsland } from '../../components/SignupCallout'
 
 /**
  * All docs content sections. Each is a plain function — no local state needed
@@ -712,6 +713,8 @@ html\`<section>\${sandbox({ source })}</section>\`(root)`)}
           language: 'json',
           source: sandboxTool,
         })}
+
+        ${SignupCalloutIsland()}
       </div>
     </section>
   `
