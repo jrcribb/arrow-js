@@ -160,40 +160,42 @@ describe('create-arrow-js', () => {
       const projectDir = path.resolve(workspace, 'arrow-app')
       const packDir = path.resolve(workspace, 'packs')
 
-      await scaffoldArrowApp(projectDir, {
-        skillAgent: 'skip',
+      await withWorkspaceIntegrationLock(async () => {
+        await scaffoldArrowApp(projectDir, {
+          skillAgent: 'skip',
+        })
+        await fs.mkdir(packDir, { recursive: true })
+        const tarballs = await getPackedWorkspacePackages(arrowPackages, packDir)
+
+        await rewriteArrowDependencies(projectDir, tarballs)
+
+        await execa('pnpm', ['install', '--prefer-offline'], {
+          cwd: projectDir,
+        })
+
+        const server = startArrowAppServer(projectDir)
+
+        try {
+          const output = await waitForStreamMatch(
+            server.all!,
+            /Arrow app running at http:\/\/127\.0\.0\.1:(\d+)/
+          )
+          const port = Number(
+            /Arrow app running at http:\/\/127\.0\.0\.1:(\d+)/.exec(output)?.[1]
+          )
+          const response = await fetchWithTimeout(`http://127.0.0.1:${port}/`)
+          const html = await response.text()
+
+          expect(response.status).toBe(200)
+          expect(html).toContain('<link rel="stylesheet" href="/src/style.css" />')
+          expect(html).toContain('pnpm create arrow-js@latest')
+          expect(html).toContain('SSR + Hydration')
+        } finally {
+          await stopProcess(server)
+        }
       })
-      await fs.mkdir(packDir, { recursive: true })
-      const tarballs = await getPackedWorkspacePackages(arrowPackages, packDir)
-
-      await rewriteArrowDependencies(projectDir, tarballs)
-
-      await execa('pnpm', ['install', '--prefer-offline'], {
-        cwd: projectDir,
-      })
-
-      const server = startArrowAppServer(projectDir)
-
-      try {
-        const output = await waitForStreamMatch(
-          server.all!,
-          /Arrow app running at http:\/\/127\.0\.0\.1:(\d+)/
-        )
-        const port = Number(
-          /Arrow app running at http:\/\/127\.0\.0\.1:(\d+)/.exec(output)?.[1]
-        )
-        const response = await fetchWithTimeout(`http://127.0.0.1:${port}/`)
-        const html = await response.text()
-
-        expect(response.status).toBe(200)
-        expect(html).toContain('<link rel="stylesheet" href="/src/style.css" />')
-        expect(html).toContain('pnpm create arrow-js@latest')
-        expect(html).toContain('SSR + Hydration')
-      } finally {
-        await stopProcess(server)
-      }
     },
-    90_000
+    150_000
   )
 
   runVite8Only(
