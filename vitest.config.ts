@@ -1,6 +1,8 @@
 import path from 'node:path'
 import { defineConfig } from 'vitest/config'
 
+const isLinuxCi = process.platform === 'linux' && process.env.CI === 'true'
+
 export default defineConfig({
   resolve: {
     alias: [
@@ -56,6 +58,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    fileParallelism: !isLinuxCi,
     include: ['packages/**/*.spec.ts', 'tests/**/*.spec.ts'],
     exclude: ['tests/e2e/**', 'tests/sandbox-e2e/**', '**/node_modules/**'],
   },
