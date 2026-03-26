@@ -69,35 +69,21 @@ function compileTextNode(node: Text): TemplateNodeDescriptor[] {
     return createStaticTextNodes(node.data)
   }
 
-  if (
-    expressionParts.length === 1 &&
-    parts.every(
-      (part) => part.kind === 'expr' || !part.value.trim().length
-    )
-  ) {
-    const nodes: TemplateNodeDescriptor[] = []
+  const nodes: TemplateNodeDescriptor[] = []
 
-    for (const part of parts) {
-      if (part.kind === 'static') {
-        nodes.push(...createStaticTextNodes(part.value))
-        continue
-      }
-
-      nodes.push({
-        kind: 'region',
-        exprIndex: part.exprIndex,
-      })
+  for (const part of parts) {
+    if (part.kind === 'static') {
+      nodes.push(...createStaticTextNodes(part.value))
+      continue
     }
 
-    return nodes
+    nodes.push({
+      kind: 'region',
+      exprIndex: part.exprIndex,
+    })
   }
 
-  return [
-    {
-      kind: 'text-binding',
-      parts,
-    },
-  ]
+  return nodes
 }
 
 function compileAttributeBinding(

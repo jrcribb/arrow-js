@@ -14,6 +14,14 @@ function isObject(value: unknown): value is ReactiveTarget {
   return value !== null && typeof value === 'object'
 }
 
+function isReactiveTarget(value: unknown): value is ReactiveTarget {
+  if (!isObject(value)) return false
+  if (Array.isArray(value)) return true
+
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 function cleanupEffect(effect: EffectRunner) {
   for (const dep of effect.deps) {
     dep.delete(effect)
@@ -77,7 +85,7 @@ function createRunner<T>(effect: () => T, afterEffect?: (value: T) => unknown) {
 }
 
 export function reactive<T extends ReactiveTarget>(value: T): T {
-  if (!isObject(value)) {
+  if (!isReactiveTarget(value)) {
     throw new Error('sandbox reactive() expects an object or array.')
   }
 
@@ -88,11 +96,13 @@ export function reactive<T extends ReactiveTarget>(value: T): T {
     get(target, key, receiver) {
       const result = Reflect.get(target, key, receiver)
       track(target, key)
-      return isObject(result) ? reactive(result) : result
+      return isReactiveTarget(result) ? reactive(result) : result
     },
     set(target, key, nextValue, receiver) {
       const previous = Reflect.get(target, key, receiver)
-      const valueToStore = isObject(nextValue) ? reactive(nextValue) : nextValue
+      const valueToStore = isReactiveTarget(nextValue)
+        ? reactive(nextValue)
+        : nextValue
       const didSet = Reflect.set(target, key, valueToStore, receiver)
       if (!Object.is(previous, valueToStore)) {
         trigger(target, key)

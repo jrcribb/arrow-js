@@ -1381,6 +1381,276 @@ describe('@arrow-js/sandbox', () => {
     instance.destroy()
   })
 
+  it('supports same-file components rendered from mapped reactive lists', async () => {
+    const root = document.createElement('div')
+
+    const instance = await sandbox(
+      `
+        const state = reactive({
+          mine: [
+            { id: 1, label: 'alpha' },
+            { id: 2, label: 'beta' },
+          ],
+          suggested: [
+            { id: 3, label: 'gamma' },
+            { id: 4, label: 'delta' },
+          ],
+        })
+
+        const TweetCard = component((props) => {
+          return html\`<article class="tweet-card">\${() => props.tweet.label}</article>\`
+        })
+
+        const MyTweetCard = component((props) => {
+          return html\`<article class="my-tweet-card">\${() => props.tweet.label}</article>\`
+        })
+
+        export default html\`
+          <main>
+            <section class="mine">
+              \${() => state.mine.map((tweet) => MyTweetCard({ tweet }).key(tweet.id))}
+            </section>
+            <section class="suggested">
+              \${() => state.suggested.map((tweet) => TweetCard({ tweet }).key(tweet.id))}
+            </section>
+          </main>
+        \`
+      `,
+      root
+    )
+
+    expect(
+      Array.from(root.querySelectorAll('.my-tweet-card')).map((node) => node.textContent)
+    ).toEqual(['alpha', 'beta'])
+    expect(
+      Array.from(root.querySelectorAll('.tweet-card')).map((node) => node.textContent)
+    ).toEqual(['gamma', 'delta'])
+
+    instance.destroy()
+  })
+
+  it('extracts same-file html tagged templates into the sandbox descriptor registry', () => {
+    const compiled = compileSandboxGraph({
+      source: {
+        'main.ts': `
+          const TweetCard = component((props) => {
+            return html\`<article class="tweet-card">\${() => props.tweet.label}</article>\`
+          })
+
+          const MyTweetCard = component((props) => {
+            return html\`<article class="my-tweet-card">\${() => props.tweet.label}</article>\`
+          })
+
+          export default html\`
+            <main>
+              \${() => [{ id: 1, label: 'alpha' }].map((tweet) => MyTweetCard({ tweet }).key(tweet.id))}
+              \${() => [{ id: 2, label: 'beta' }].map((tweet) => TweetCard({ tweet }).key(tweet.id))}
+            </main>
+          \`
+        `,
+      },
+      shadowDOM: false,
+    })
+
+    expect(Object.keys(compiled.descriptors)).toEqual([
+      '/main.ts#template:0',
+      '/main.ts#template:1',
+      '/main.ts#template:2',
+    ])
+    expect(compiled.modules['/main.ts']).not.toContain('html`')
+    expect(compiled.modules['/main.ts']).toContain(
+      '__arrowSandboxTemplate("/main.ts#template:0"'
+    )
+    expect(compiled.modules['/main.ts']).toContain(
+      '__arrowSandboxTemplate("/main.ts#template:1"'
+    )
+    expect(compiled.modules['/main.ts']).toContain(
+      '__arrowSandboxTemplate("/main.ts#template:2"'
+    )
+  })
+
+  it('extracts nested html tagged templates used inside template expressions', () => {
+    const compiled = compileSandboxGraph({
+      source: {
+        'main.ts': `
+          export default html\`<h1>Hello \${() => html\`<div>world</div>\`}</h1>\`
+        `,
+      },
+      shadowDOM: false,
+    })
+
+    expect(Object.keys(compiled.descriptors)).toEqual([
+      '/main.ts#template:0',
+      '/main.ts#template:1',
+    ])
+    expect(compiled.modules['/main.ts']).not.toContain('html`<div>world</div>`')
+    expect(compiled.modules['/main.ts']).toContain(
+      '() => __arrowSandboxTemplate("/main.ts#template:0", [])'
+    )
+    expect(compiled.modules['/main.ts']).toContain(
+      '__arrowSandboxTemplate("/main.ts#template:1"'
+    )
+  })
+
+  it('supports nested same-file tweet card components in mapped sandbox lists', async () => {
+    const root = document.createElement('div')
+
+    const instance = await sandbox(
+      `
+        const state = reactive({
+          profile: {
+            name: 'Alex Johnson',
+            handle: '@alexj',
+            bio: 'Building cool stuff with code',
+            followers: 1247,
+            following: 389,
+            avatar: 'AJ',
+          },
+          myTweets: [
+            {
+              id: 1,
+              content: 'Just shipped a new feature!',
+              likes: 42,
+              retweets: 8,
+              time: '2h ago',
+            },
+            {
+              id: 2,
+              content: 'CSS is actually really fun.',
+              likes: 156,
+              retweets: 23,
+              time: '5h ago',
+            },
+          ],
+          suggestedTweets: [
+            {
+              id: 101,
+              author: 'Sarah Dev',
+              handle: '@sarahcodes',
+              content: 'New blog post incoming.',
+              likes: 234,
+              retweets: 67,
+              time: '1h ago',
+            },
+            {
+              id: 102,
+              author: 'Tech Daily',
+              handle: '@techdaily',
+              content: 'Framework releases are getting out of hand.',
+              likes: 892,
+              retweets: 201,
+              time: '3h ago',
+            },
+          ],
+          likedTweets: new Set(),
+        })
+
+        function toggleLike(id) {
+          if (state.likedTweets.has(id)) {
+            state.likedTweets.delete(id)
+          } else {
+            state.likedTweets.add(id)
+          }
+
+          state.likedTweets = new Set(state.likedTweets)
+        }
+
+        const TweetCard = component((props) => {
+          const isLiked = () => state.likedTweets.has(props.tweet.id)
+
+          return html\`
+            <div class="tweet-card">
+              <div class="tweet-content">\${() => props.tweet.content}</div>
+              <div class="tweet-meta">
+                <span class="tweet-time">\${() => props.tweet.time}</span>
+                <button class="tweet-action" @click="\${() => toggleLike(props.tweet.id)}">
+                  <span class="\${() => (isLiked() ? 'heart liked' : 'heart')}">❤</span>
+                  <span>\${() => (isLiked() ? props.tweet.likes + 1 : props.tweet.likes)}</span>
+                </button>
+              </div>
+            </div>
+          \`
+        })
+
+        const MyTweetCard = component((props) => {
+          const isLiked = () => state.likedTweets.has(props.tweet.id)
+
+          return html\`
+            <div class="tweet-card my-tweet">
+              <div class="tweet-content">\${() => props.tweet.content}</div>
+              <div class="tweet-meta">
+                <span class="tweet-time">\${() => props.tweet.time}</span>
+                <button class="tweet-action" @click="\${() => toggleLike(props.tweet.id)}">
+                  <span class="\${() => (isLiked() ? 'heart liked' : 'heart')}">❤</span>
+                  <span>\${() => (isLiked() ? props.tweet.likes + 1 : props.tweet.likes)}</span>
+                </button>
+              </div>
+            </div>
+          \`
+        })
+
+        export default html\`
+          <div class="profile-widget">
+            <div class="profile-header">
+              <div class="avatar">\${() => state.profile.avatar}</div>
+              <div class="profile-info">
+                <h2 class="profile-name">\${() => state.profile.name}</h2>
+                <p class="profile-handle">\${() => state.profile.handle}</p>
+                <p class="profile-bio">\${() => state.profile.bio}</p>
+              </div>
+            </div>
+
+            <div class="tweets-container">
+              <div class="tweets-column mine">
+                \${() => state.myTweets.map((tweet) => MyTweetCard({ tweet }).key(tweet.id))}
+              </div>
+              <div class="tweets-column suggested">
+                \${() => state.suggestedTweets.map((tweet) => TweetCard({ tweet }).key(tweet.id))}
+              </div>
+            </div>
+          </div>
+        \`
+      `,
+      root
+    )
+
+    expect(root.querySelectorAll('.mine .tweet-card')).toHaveLength(2)
+    expect(root.querySelectorAll('.suggested .tweet-card')).toHaveLength(2)
+
+    const firstLikeButton = root.querySelector('.mine .tweet-action')
+    if (!(firstLikeButton instanceof HTMLButtonElement)) {
+      throw new Error('Expected first tweet action button to exist.')
+    }
+
+    firstLikeButton.click()
+    await waitForSandbox()
+
+    expect(
+      root.querySelector('.mine .tweet-action:last-child span:last-child')?.textContent
+    ).toBe('43')
+
+    instance.destroy()
+  })
+
+  it('renders nested html tagged templates inside sandbox reactive expressions', async () => {
+    const root = document.createElement('div')
+    const source = reactive({
+      source: {
+        'main.ts':
+          "export default html`<h1>Hello ${() => html`<div>world</div>`}</h1>`",
+      },
+    })
+
+    html`<div>${renderSandbox(source)}</div>`(root)
+    const host = getSandboxHost(root)
+    await waitForSandboxHost(host)
+
+    const heading = getSandboxRenderRoot(host).querySelector('h1')
+    expect(heading?.childNodes.length).toBeGreaterThan(1)
+    expect(heading?.textContent).toBe('Hello world')
+    expect(heading?.querySelector('div')?.textContent).toBe('world')
+  })
+
   it('supports sandboxed setInterval and clearInterval callbacks', async () => {
     vi.useFakeTimers()
 
