@@ -15,6 +15,7 @@ const supportedImports = new Set([
   'c',
   'html',
   't',
+  'onCleanup',
   'pick',
   'props',
   'reactive',

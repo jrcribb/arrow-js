@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { html, reactive } from '@arrow-js/core'
 import { compileSandboxGraph } from './compiler'
 import {
+  type HostBridge,
   sandbox as renderSandbox,
   type SandboxEvents,
   type SandboxProps,
@@ -157,20 +158,24 @@ async function sandbox(
   code: string,
   mountPoint: Element,
   options: LegacySandboxOptions = {},
-  events?: SandboxEvents
+  events?: SandboxEvents,
+  hostBridge?: HostBridge
 ): Promise<LegacySandboxInstance> {
   let currentCode = code
   let currentOptions = options
   let currentEvents = events
+  let currentHostBridge = hostBridge
 
   const mount = async (
     nextCode = currentCode,
     nextOptions = currentOptions,
-    nextEvents = currentEvents
+    nextEvents = currentEvents,
+    nextHostBridge = currentHostBridge
   ) => {
     currentCode = nextCode
     currentOptions = nextOptions
     currentEvents = nextEvents
+    currentHostBridge = nextHostBridge
     const props = buildLegacySandboxProps(currentCode, currentOptions)
     compileSandboxGraph(props)
 
@@ -189,7 +194,8 @@ async function sandbox(
           providedOnError?.(error)
         },
       },
-      currentEvents
+      currentEvents,
+      currentHostBridge
     )(mountPoint)
     await flushSandboxJobs()
     await waitForSandboxHost(mountPoint.querySelector('arrow-sandbox'))
@@ -472,6 +478,109 @@ describe('@arrow-js/sandbox', () => {
     instance.destroy()
   })
 
+  it('supports explicit @arrow-js/core imports from a main.js entry', async () => {
+    const root = document.createElement('div')
+
+    renderSandbox({
+      source: {
+        'main.js': [
+          'import { html, reactive } from "@arrow-js/core";',
+          'const state = reactive({ count: 0 })',
+          'export default html`<div><button @click="${() => state.count++}">Click</button><span>Clicks: ${() => state.count}</span></div>`',
+        ].join('\n'),
+        'main.css': [
+          'button {',
+          '  font-family: Arial;',
+          '  font-size: 14pt;',
+          '  color: black;',
+          '  background-color: white;',
+          '  padding: 0.75rem 1rem;',
+          '}',
+        ].join('\n'),
+      },
+    })(root)
+
+    const host = getSandboxHost(root)
+    await waitForSandboxHost(host)
+    const renderRoot = getSandboxRenderRoot(host)
+    const button = renderRoot.querySelector('button') as HTMLButtonElement
+    const span = renderRoot.querySelector('span') as HTMLSpanElement
+
+    expect(button.textContent).toBe('Click')
+    expect(span.textContent).toBe('Clicks: 0')
+    expect(host.shadowRoot?.querySelector('style')?.textContent).toContain(
+      'font-family: Arial;'
+    )
+
+    button.click()
+    await waitForSandbox()
+
+    expect(span.textContent).toBe('Clicks: 1')
+  })
+
+  it('supports aliased @arrow-js/core imports without stomping local names', async () => {
+    const root = document.createElement('div')
+
+    const instance = await sandbox(
+      `
+        import { html as html2, reactive } from '@arrow-js/core'
+
+        const html = '123'
+        const state = reactive({ count: 0 })
+
+        export default html2\`
+          <div>
+            <span class="value">\${html}</span>
+            <button @click="\${() => state.count++}">\${() => state.count}</button>
+          </div>
+        \`
+      `,
+      root
+    )
+
+    const button = root.querySelector('button') as HTMLButtonElement
+    expect(root.querySelector('.value')?.textContent).toBe('123')
+    expect(button.textContent).toBe('0')
+
+    button.click()
+    await waitForSandbox()
+
+    expect(button.textContent).toBe('1')
+    instance.destroy()
+  })
+
+  it('rejects namespace-style @arrow-js/core imports', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `
+          import * as Arrow from '@arrow-js/core'
+
+          export default Arrow.html\`<div>unreachable</div>\`
+        `,
+        root
+      )
+    ).rejects.toThrow(/only supports named imports|namespace-style/i)
+  })
+
+  it('rejects unsupported named imports from @arrow-js/core', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `
+          import { output } from '@arrow-js/core'
+
+          output({ status: 'nope' })
+
+          export default html\`<div>unreachable</div>\`
+        `,
+        root
+      )
+    ).rejects.toThrow(/Unsupported @arrow-js\/core import "output"/)
+  })
+
   it('supports sandbox component emits with parent-provided listeners', async () => {
     const root = document.createElement('div')
 
@@ -667,6 +776,338 @@ describe('@arrow-js/sandbox', () => {
 
     expect(output).toHaveBeenCalledTimes(1)
     expect(output).toHaveBeenCalledWith({ color: 'red' })
+  })
+
+  it('supports hostBridge imports with sync host functions', async () => {
+    const root = document.createElement('div')
+    const getGreeting = vi.fn((name: unknown) => ({
+      message: `Hello ${String(name)}`,
+    }))
+
+    const instance = await sandbox(
+      `
+        import { getGreeting } from 'host-bridge:greetings'
+
+        const payload = await getGreeting('Arrow')
+
+        export default html\`<div id="payload">\${payload.message}</div>\`
+      `,
+      root,
+      {},
+      undefined,
+      {
+        'host-bridge:greetings': {
+          getGreeting,
+        },
+      }
+    )
+
+    expect(getGreeting).toHaveBeenCalledWith('Arrow')
+    expect(root.querySelector('#payload')?.textContent).toBe('Hello Arrow')
+    instance.destroy()
+  })
+
+  it('supports hostBridge imports with async host functions', async () => {
+    const root = document.createElement('div')
+    const getGreeting = vi.fn(async (name: unknown) => ({
+      message: `Hello ${String(name)}`,
+    }))
+
+    const instance = await sandbox(
+      `
+        import { getGreeting } from 'host-bridge:greetings'
+
+        const payload = await getGreeting('Async Arrow')
+
+        export default html\`<div id="payload">\${payload.message}</div>\`
+      `,
+      root,
+      {},
+      undefined,
+      {
+        'host-bridge:greetings': {
+          getGreeting,
+        },
+      }
+    )
+
+    expect(getGreeting).toHaveBeenCalledWith('Async Arrow')
+    expect(root.querySelector('#payload')?.textContent).toBe('Hello Async Arrow')
+    instance.destroy()
+  })
+
+  it('runs onCleanup callbacks and allows them to call hostBridge exports', async () => {
+    const root = document.createElement('div')
+    const notifyCleanup = vi.fn(async (label: unknown) => ({
+      label: String(label),
+    }))
+
+    const instance = await sandbox(
+      `
+        import { component, html, onCleanup, reactive } from '@arrow-js/core'
+        import { notifyCleanup } from 'host-bridge:lifecycle'
+
+        const state = reactive({ visible: true })
+
+        const Child = component(() => {
+          onCleanup(() => {
+            void notifyCleanup('child removed')
+          })
+
+          return html\`<span class="child">child</span>\`
+        })
+
+        export default html\`
+          <div>
+            <button class="toggle" @click="\${() => (state.visible = false)}">hide</button>
+            \${() => (state.visible ? Child() : '')}
+          </div>
+        \`
+      `,
+      root,
+      {},
+      undefined,
+      {
+        'host-bridge:lifecycle': {
+          notifyCleanup,
+        },
+      }
+    )
+
+    expect(root.querySelector('.child')?.textContent).toBe('child')
+
+    ;(root.querySelector('.toggle') as HTMLButtonElement).click()
+    await waitForSandbox()
+    await flushSandboxJobs()
+
+    expect(root.querySelector('.child')).toBeNull()
+    expect(notifyCleanup).toHaveBeenCalledWith('child removed')
+    instance.destroy()
+  })
+
+  it('throws when onCleanup is used outside a component', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `
+          import { onCleanup } from '@arrow-js/core'
+
+          onCleanup(() => {})
+
+          export default html\`<div>unreachable</div>\`
+        `,
+        root
+      )
+    ).rejects.toThrow(/onCleanup needs component/i)
+  })
+
+  it('cleans up component watch subscriptions on unmount', async () => {
+    const root = document.createElement('div')
+    const record = vi.fn((value: unknown) => value)
+
+    const instance = await sandbox(
+      `
+        import { component, html, reactive, watch } from '@arrow-js/core'
+        import { record } from 'host-bridge:tracker'
+
+        const state = reactive({
+          count: 0,
+          visible: true,
+        })
+
+        const Child = component((props) => {
+          watch(
+            () => props.count,
+            (value) => {
+              void record(value)
+              return value
+            }
+          )
+
+          return html\`<span class="child">\${() => props.count}</span>\`
+        })
+
+        export default html\`
+          <div>
+            <button class="inc" @click="\${() => state.count++}">inc</button>
+            <button class="hide" @click="\${() => (state.visible = false)}">hide</button>
+            \${() => (state.visible ? Child(state) : '')}
+          </div>
+        \`
+      `,
+      root,
+      {},
+      undefined,
+      {
+        'host-bridge:tracker': {
+          record,
+        },
+      }
+    )
+
+    const initialCallCount = record.mock.calls.length
+    expect(initialCallCount).toBeGreaterThan(0)
+    expect(record.mock.calls.at(-1)?.[0]).toBe(0)
+
+    ;(root.querySelector('.inc') as HTMLButtonElement).click()
+    await waitForSandbox()
+    await flushSandboxJobs()
+
+    expect(record.mock.calls.length).toBeGreaterThan(initialCallCount)
+    const callsAfterIncrement = record.mock.calls.length
+    expect(record.mock.calls.at(-1)?.[0]).toBe(1)
+
+    ;(root.querySelector('.hide') as HTMLButtonElement).click()
+    await waitForSandbox()
+    await flushSandboxJobs()
+
+    ;(root.querySelector('.inc') as HTMLButtonElement).click()
+    await waitForSandbox()
+    await flushSandboxJobs()
+
+    expect(record.mock.calls.length).toBe(callsAfterIncrement)
+    instance.destroy()
+  })
+
+  it('surfaces hostBridge errors during sandbox boot', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `
+          import { explode } from 'host-bridge:failures'
+
+          await explode()
+
+          export default html\`<div>unreachable</div>\`
+        `,
+        root,
+        {},
+        undefined,
+        {
+          'host-bridge:failures': {
+            explode() {
+              throw new Error('bridge exploded')
+            },
+          },
+        }
+      )
+    ).rejects.toThrow('bridge exploded')
+  })
+
+  it('rejects non-serializable hostBridge return values', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `
+          import { getMap } from 'host-bridge:values'
+
+          await getMap()
+
+          export default html\`<div>unreachable</div>\`
+        `,
+        root,
+        {},
+        undefined,
+        {
+          'host-bridge:values': {
+            getMap() {
+              return new Map([['a', 1]])
+            },
+          },
+        }
+      )
+    ).rejects.toThrow(/plain objects|plain serializable data/i)
+  })
+
+  it('rejects circular hostBridge return values', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `
+          import { getCircular } from 'host-bridge:values'
+
+          await getCircular()
+
+          export default html\`<div>unreachable</div>\`
+        `,
+        root,
+        {},
+        undefined,
+        {
+          'host-bridge:values': {
+            getCircular() {
+              const value: Record<string, unknown> = {}
+              value.self = value
+              return value
+            },
+          },
+        }
+      )
+    ).rejects.toThrow(/circular references/i)
+  })
+
+  it('rejects relative hostBridge specifiers', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `export default html\`<div>unreachable</div>\``,
+        root,
+        {},
+        undefined,
+        {
+          './bad-bridge': {
+            ping() {
+              return 'nope'
+            },
+          },
+        }
+      )
+    ).rejects.toThrow(/must be bare imports/i)
+  })
+
+  it('rejects hostBridge attempts to override @arrow-js/core', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `export default html\`<div>unreachable</div>\``,
+        root,
+        {},
+        undefined,
+        {
+          '@arrow-js/core': {
+            html() {
+              return 'nope'
+            },
+          },
+        }
+      )
+    ).rejects.toThrow(/cannot override reserved specifier "@arrow-js\/core"/i)
+  })
+
+  it('rejects invalid hostBridge export names', async () => {
+    const root = document.createElement('div')
+
+    await expect(
+      sandbox(
+        `export default html\`<div>unreachable</div>\``,
+        root,
+        {},
+        undefined,
+        {
+          'host-bridge:invalid': {
+            ['not-valid']() {
+              return 'nope'
+            },
+          },
+        }
+      )
+    ).rejects.toThrow(/must be a valid identifier/i)
   })
 
   it('supports sandboxed fetch JSON responses with safe host defaults', async () => {

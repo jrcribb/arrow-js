@@ -1,4 +1,7 @@
 export type {
+  HostBridge,
+  HostBridgeFn,
+  HostBridgeModule,
   SandboxEvents,
   SandboxProps,
 } from './shared/protocol'
@@ -14,7 +17,11 @@ export type {
 } from './shared/protocol'
 
 import type { ArrowTemplate } from '@arrow-js/core'
-import type { SandboxEvents, SandboxProps } from './shared/protocol'
+import type {
+  HostBridge,
+  SandboxEvents,
+  SandboxProps,
+} from './shared/protocol'
 import { sandbox as renderSandbox } from './host/instance'
 
 export function sandbox<T extends {
@@ -24,7 +31,8 @@ export function sandbox<T extends {
   debug?: boolean
 }>(
   props: T,
-  events?: SandboxEvents
+  events?: SandboxEvents,
+  hostBridge?: HostBridge
 ): ArrowTemplate {
-  return renderSandbox(props, events)
+  return renderSandbox(props, events, hostBridge)
 }

@@ -1,5 +1,5 @@
 import { reactive } from '@arrow-js/core'
-import { sandbox } from './index'
+import { sandbox, type HostBridge } from './index'
 
 const plain = sandbox({
   source: {
@@ -17,5 +17,24 @@ const reactiveConfig = reactive({
 
 const reactiveResult = sandbox(reactiveConfig)
 
+const hostBridge: HostBridge = {
+  'host-bridge:greetings': {
+    getGreeting(name) {
+      return { message: `Hello ${String(name)}` }
+    },
+  },
+}
+
+const bridgedResult = sandbox(
+  {
+    source: {
+      'main.ts': `export default html\`<div>bridged</div>\``,
+    },
+  },
+  undefined,
+  hostBridge
+)
+
 void plain
 void reactiveResult
+void bridgedResult

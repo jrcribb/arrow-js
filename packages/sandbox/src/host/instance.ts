@@ -1,6 +1,7 @@
 import { component, html, watch } from '@arrow-js/core'
 import type { ArrowTemplate, Props } from '@arrow-js/core'
 import type {
+  HostBridge,
   HostToVmMessage,
   SandboxEvents,
   SandboxProps,
@@ -41,6 +42,7 @@ type SandboxHostProps = Omit<SandboxProps, 'source'> & {
 type SandboxTemplateProps = Record<PropertyKey, unknown> & {
   config: SandboxHostProps
   events?: SandboxEvents
+  hostBridge?: HostBridge
 }
 
 const SANDBOX_TAG_NAME = 'arrow-sandbox'
@@ -48,15 +50,19 @@ const sandboxHostRecords = new Map<string, SandboxHostRecord>()
 const sandboxHostElements = new Map<string, ArrowSandboxElement>()
 let nextSandboxHostId = 0
 let sandboxBootRuntimePromise: Promise<SandboxBootRuntime> | null = null
+let nextHostBridgeFunctionId = 0
+const hostBridgeFunctionIds = new WeakMap<Function, number>()
 
 interface SandboxHostRecord {
   events?: SandboxEvents
+  hostBridge?: HostBridge
   props: ResolvedSandboxProps
 }
 
 class SandboxController {
   private props: ResolvedSandboxProps
   private events: SandboxEvents | undefined
+  private hostBridge: HostBridge | undefined
   private readonly mountPoint: Element
   private readonly renderer: HostRenderer
   private runner: VmRunner | null = null
@@ -64,11 +70,13 @@ class SandboxController {
   constructor(
     mountPoint: Element,
     props: ResolvedSandboxProps,
-    events?: SandboxEvents
+    events?: SandboxEvents,
+    hostBridge?: HostBridge
   ) {
     this.mountPoint = mountPoint
     this.props = props
     this.events = events
+    this.hostBridge = hostBridge
     this.renderer = new HostRenderer({
       mountPoint,
       onEvent: (handlerId, payload) =>
@@ -83,9 +91,14 @@ class SandboxController {
     })
   }
 
-  setCallbacks(props: ResolvedSandboxProps, events?: SandboxEvents) {
+  setCallbacks(
+    props: ResolvedSandboxProps,
+    events?: SandboxEvents,
+    hostBridge?: HostBridge
+  ) {
     this.props = props
     this.events = events
+    this.hostBridge = hostBridge
   }
 
   async mount() {
@@ -122,6 +135,7 @@ class SandboxController {
     const runner = await runtime.createVmRunner({
       compiled,
       debug: this.props.debug,
+      hostBridge: this.hostBridge,
       onMessage: (message) => {
         switch (message.type) {
           case 'render':
@@ -226,6 +240,7 @@ class ArrowSandboxElement extends HTMLElement {
   private currentSignature = ''
   private hostId: string | null = null
   private mountPoint: HTMLDivElement | null = null
+  private hostBridgeState: HostBridge | undefined
   private sandboxEventsState: SandboxEvents | undefined
   private sandboxPropsValue: ResolvedSandboxProps | null = null
   private shadowMode = false
@@ -260,10 +275,12 @@ class ArrowSandboxElement extends HTMLElement {
   applyRecord(record: SandboxHostRecord) {
     this.sandboxPropsValue = record.props
     this.sandboxEventsState = record.events
+    this.hostBridgeState = record.hostBridge
     if (this.controller && this.sandboxPropsValue) {
       this.controller.setCallbacks(
         this.sandboxPropsValue,
-        this.sandboxEventsState
+        this.sandboxEventsState,
+        this.hostBridgeState
       )
     }
     this.requestSync()
@@ -347,14 +364,19 @@ class ArrowSandboxElement extends HTMLElement {
       this.currentSignature === props.sourceSignature &&
       this.shadowMode === props.shadowDOM
     ) {
-      this.controller.setCallbacks(props, this.sandboxEventsState)
+      this.controller.setCallbacks(
+        props,
+        this.sandboxEventsState,
+        this.hostBridgeState
+      )
       return
     }
 
     const nextController = new SandboxController(
       this.mountPoint,
       props,
-      this.sandboxEventsState
+      this.sandboxEventsState,
+      this.hostBridgeState
     )
 
     try {
@@ -404,7 +426,32 @@ function cloneSandboxEvents(events?: SandboxEvents) {
   }
 }
 
-function resolveSandboxProps(props: SandboxHostProps): ResolvedSandboxProps {
+function getHostBridgeFunctionId(fn: Function) {
+  let id = hostBridgeFunctionIds.get(fn)
+  if (!id) {
+    id = ++nextHostBridgeFunctionId
+    hostBridgeFunctionIds.set(fn, id)
+  }
+  return id
+}
+
+function createHostBridgeSignature(hostBridge?: HostBridge) {
+  if (!hostBridge) return []
+
+  return Object.entries(hostBridge)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([specifier, bridgeModule]) => [
+      specifier,
+      Object.entries(bridgeModule)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, fn]) => [name, getHostBridgeFunctionId(fn)]),
+    ])
+}
+
+function resolveSandboxProps(
+  props: SandboxHostProps,
+  hostBridge?: HostBridge
+): ResolvedSandboxProps {
   const sourceEntries = Object.entries(props.source || {})
     .map(([name, value]) => [normalizeVirtualPath(name), String(value)] as const)
     .sort(([left], [right]) => left.localeCompare(right))
@@ -420,6 +467,7 @@ function resolveSandboxProps(props: SandboxHostProps): ResolvedSandboxProps {
       props.debug ?? false,
       props.shadowDOM !== false,
       sourceEntries,
+      createHostBridgeSignature(hostBridge),
     ]),
   }
 }
@@ -430,7 +478,8 @@ const SandboxHostComponent = component<SandboxTemplateProps>(
     const syncRecord = () => {
       setSandboxHostRecord(hostId, {
         events: cloneSandboxEvents(props.events),
-        props: resolveSandboxProps(props.config),
+        hostBridge: props.hostBridge,
+        props: resolveSandboxProps(props.config, props.hostBridge),
       })
       return hostId
     }
@@ -449,8 +498,13 @@ export function sandbox<T extends {
   debug?: boolean
 }>(
   props: T,
-  events?: SandboxEvents
+  events?: SandboxEvents,
+  hostBridge?: HostBridge
 ): ArrowTemplate {
   ensureSandboxElement()
-  return html`${SandboxHostComponent({ config: props as SandboxHostProps, events })}`
+  return html`${SandboxHostComponent({
+    config: props as SandboxHostProps,
+    events,
+    hostBridge,
+  })}`
 }

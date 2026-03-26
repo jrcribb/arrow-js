@@ -8,6 +8,7 @@ type EffectRunner = {
 const proxyCache = new WeakMap<object, unknown>()
 const targetMap = new WeakMap<object, Map<PropertyKey, Set<EffectRunner>>>()
 let activeEffect: EffectRunner | null = null
+let cleanupCollector: Array<() => void> | null = null
 
 function isObject(value: unknown): value is ReactiveTarget {
   return value !== null && typeof value === 'object'
@@ -118,9 +119,38 @@ export function watch<T>(
     cleanupEffect(runner)
   }
 
+  cleanupCollector?.push(stop)
+
   return [runner.run(), stop]
 }
 
 export function nextTick(fn?: CallableFunction) {
   return Promise.resolve().then(() => fn?.())
+}
+
+export function swapCleanupCollector(collector: Array<() => void> | null) {
+  const previous = cleanupCollector
+  cleanupCollector = collector
+  return previous
+}
+
+export function onCleanup(fn: () => void) {
+  const collector = cleanupCollector
+  if (!collector) {
+    throw new Error('onCleanup needs component')
+  }
+
+  let active = true
+  const dispose = () => {
+    if (!active) return
+    active = false
+    const index = collector.indexOf(dispose)
+    if (index >= 0) {
+      collector.splice(index, 1)
+    }
+    fn()
+  }
+
+  collector.push(dispose)
+  return dispose
 }

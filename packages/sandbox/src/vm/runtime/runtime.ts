@@ -1,4 +1,10 @@
-import { nextTick, reactive, watch } from './reactive'
+import {
+  nextTick,
+  onCleanup,
+  reactive,
+  swapCleanupCollector,
+  watch,
+} from './reactive'
 import type {
   HostToVmMessage,
   SandboxedEventPayload,
@@ -358,9 +364,20 @@ function normalizeRenderable(
 
   if (isComponentCall(value)) {
     const [props, emit] = createPropsProxy(value.p, value.h, value.e)
-    const renderable = value.h(props, emit)
+    const cleanups: Array<() => void> = []
+    const previousCollector = swapCleanupCollector(cleanups)
+    let renderable: unknown
+
+    try {
+      renderable = value.h(props, emit)
+    } finally {
+      swapCleanupCollector(previousCollector)
+    }
+
     const children = normalizeRenderable(renderable, emitPatchUpdates)
-    return [children.length === 1 ? children[0] : createFragmentNode(children)]
+    const node = children.length === 1 ? children[0] : createFragmentNode(children)
+    node.cleanups.push(...cleanups)
+    return [node]
   }
 
   if (isTemplateInstance(value)) {
@@ -855,6 +872,7 @@ export function output(payload: unknown) {
 
 export {
   nextTick,
+  onCleanup,
   reactive,
   reportError,
   watch,

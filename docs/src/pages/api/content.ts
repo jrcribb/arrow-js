@@ -1188,6 +1188,10 @@ export function SandboxApi() {
         </h3>
         ${TsCodeBlock(`import type { ArrowTemplate } from '@arrow-js/core'
 
+type HostBridgeFn = (...args: unknown[]) => unknown | Promise&lt;unknown&gt;
+type HostBridgeModule = Record&lt;string, HostBridgeFn&gt;
+type HostBridge = Record&lt;string, HostBridgeModule&gt;
+
 interface SandboxProps {
   source: Record&lt;string, string&gt;
   shadowDOM?: boolean;
@@ -1206,7 +1210,8 @@ declare function sandbox&lt;T extends {
   debug?: boolean;
 }&gt;(
   props: T,
-  events?: SandboxEvents
+  events?: SandboxEvents,
+  hostBridge?: HostBridge
 ): ArrowTemplate`)}
 
         <h3
@@ -1231,6 +1236,10 @@ declare function sandbox&lt;T extends {
             Use the optional second argument to receive
             <code>output(payload)</code> calls from inside the sandbox.
           </li>
+          <li>
+            Use the optional third argument to expose host bridge modules that
+            sandbox code can import directly.
+          </li>
         </ul>
 
         <h3
@@ -1244,11 +1253,12 @@ import { sandbox } from '@arrow-js/sandbox'
 const source = {
   'main.ts': [
     "import { html, reactive } from '@arrow-js/core'",
+    "import { formatCount } from 'host-bridge:demo'",
     '',
     'const state = reactive({ count: 0 })',
     '',
     'export default html\`<button @click="\${() => state.count++}">',
-    '  Count \${() => state.count}',
+    '  \${() => formatCount(state.count)}',
     '</button>\`',
   ].join('\\n'),
 }
@@ -1256,6 +1266,12 @@ const source = {
 html\`<main>\${sandbox({ source }, {
   output(payload) {
     console.log(payload)
+  },
+}, {
+  'host-bridge:demo': {
+    formatCount(count) {
+      return 'Count ' + count
+    },
   },
 })}</main>\``)}
 
