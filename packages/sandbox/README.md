@@ -43,7 +43,7 @@ const view = sandbox({
 view(document.getElementById('app')!)
 ```
 
-Arrow identifiers such as `html`, `reactive`, `component`, `pick`, and `props` can be auto-injected when they are used as free identifiers. Explicit user imports are preserved.
+Arrow identifiers such as `html`, `reactive`, `component`, `pick`, `props`, `nextTick`, and `onCleanup` can be auto-injected when they are used as free identifiers. Explicit user imports are preserved, including aliased imports from `@arrow-js/core`.
 
 ## Multi-file modules
 
@@ -97,6 +97,10 @@ export interface SandboxEvents {
   output?: (payload: unknown) => void
 }
 
+export type HostBridgeFn = (...args: unknown[]) => unknown | Promise<unknown>
+export type HostBridgeModule = Record<string, HostBridgeFn>
+export type HostBridge = Record<string, HostBridgeModule>
+
 export function sandbox<T extends {
   source: object
   shadowDOM?: boolean
@@ -104,7 +108,8 @@ export function sandbox<T extends {
   debug?: boolean
 }>(
   props: T,
-  events?: SandboxEvents
+  events?: SandboxEvents,
+  hostBridge?: HostBridge
 ): ArrowTemplate
 ```
 
@@ -123,6 +128,35 @@ Source requirements:
 - all other entries are virtual JS/TS/MJS modules
 
 `shadowDOM` defaults to `true`. When enabled, the sandbox mounts into an open shadow root on `<arrow-sandbox>`. When disabled, it mounts into the element’s light DOM instead.
+
+### Host bridge modules
+
+The optional third `hostBridge` argument exposes host-owned functions as importable sandbox modules:
+
+```ts
+const view = sandbox(
+  {
+    source: {
+      'main.ts': `
+        import { getGreeting } from 'host-bridge:greetings'
+
+        const payload = await getGreeting('Arrow')
+        export default html\`<div>\${payload.message}</div>\`
+      `,
+    },
+  },
+  undefined,
+  {
+    'host-bridge:greetings': {
+      getGreeting(name) {
+        return { message: \`Hello \${String(name)}\` }
+      },
+    },
+  }
+)
+```
+
+Each top-level `hostBridge` key is imported directly as a module specifier. Bridge exports are named functions only, and sandbox code always receives Promise-returning functions. Bridge arguments and return values must be plain serializable data.
 
 ### Sandbox output bridge
 
@@ -197,6 +231,7 @@ This bridge is designed to avoid ambient page credentials and host DOM access. I
 - async `component()` composition with VM-owned fallback/render/error handling
 - `pick()` / `props()` narrowing for component props
 - global `output(payload)` host bridge
+- direct host bridge modules passed through the third `sandbox()` argument
 - reactive updates inside the VM
 - restricted bridged `fetch()` requests and JSON/text response handling
 - bridged timer callbacks via `setTimeout` and `setInterval`
@@ -205,7 +240,6 @@ This bridge is designed to avoid ambient page credentials and host DOM access. I
 
 ## Unsupported or partial
 
-- full `@arrow-js/core` parity
 - keyed list diffing
 - direct DOM refs or real DOM node access
 - arbitrary external imports

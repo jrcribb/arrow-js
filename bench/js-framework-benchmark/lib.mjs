@@ -1,9 +1,11 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import {
+  cpSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -23,6 +25,8 @@ export const benchmarkRepoUrl =
 export const benchmarkBuildZipUrl =
   process.env.JS_FRAMEWORK_BENCHMARK_BUILD_URL ??
   `https://github.com/krausest/js-framework-benchmark/releases/download/${benchmarkTag}/build.zip`
+export const benchmarkArrowMode =
+  process.env.JS_FRAMEWORK_BENCHMARK_ARROW_MODE ?? 'published'
 
 const benchmarkBuildZipPath = join(benchmarkRepoDir, 'build.zip')
 const benchmarkBuildMarker = join(
@@ -41,16 +45,33 @@ export function run(command, args, options = {}) {
   })
 }
 
-export function getVersionLabel() {
-  const pkg = JSON.parse(
+function getCorePackage() {
+  return JSON.parse(
     readFileSync(join(rootDir, 'packages', 'core', 'package.json'), 'utf8')
   )
+}
+
+export function getPublishedCoreVersion() {
+  return getCorePackage().version
+}
+
+export function getVersionLabel() {
   const sha = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
     cwd: rootDir,
     encoding: 'utf8',
   })
   const suffix = sha.status === 0 ? `+${sha.stdout.trim()}` : ''
-  return `${pkg.version}${suffix}`
+  return `${getPublishedCoreVersion()}${suffix}`
+}
+
+function assertBenchmarkArrowMode(mode) {
+  if (mode === 'published' || mode === 'local') {
+    return
+  }
+
+  throw new Error(
+    `Unknown JS framework benchmark Arrow mode: ${mode}. Expected "published" or "local".`
+  )
 }
 
 export function ensureBenchmarkRepo({ install = false } = {}) {
@@ -91,8 +112,9 @@ function frameworkDir(keyed) {
   return join(benchmarkRepoDir, 'frameworks', keyed ? 'keyed' : 'non-keyed', 'arrowjs')
 }
 
-function createArrowMainSource(keyed) {
+function createArrowMainSource(keyed, mode) {
   const title = keyed ? 'ArrowJS (keyed)' : 'ArrowJS (non-keyed)'
+  const importPath = mode === 'local' ? './arrow.js' : '@arrow-js/core'
   const rows = `() => {
         const items = data.items
         const rows = new Array(items.length)
@@ -101,7 +123,7 @@ function createArrowMainSource(keyed) {
         }
         return rows
       }`
-  return `import { reactive, html } from './arrow.js';
+  return `import { reactive, html } from '${importPath}';
 let data = reactive({
   items: [],
   selected: undefined,
@@ -218,8 +240,9 @@ html\`<div class="container">
 `
 }
 
-function createArrowIndexHtml(keyed) {
+function createArrowIndexHtml(keyed, mode) {
   const title = keyed ? 'ArrowJS • Keyed' : 'ArrowJS • Non-keyed'
+  const entryPoint = mode === 'local' ? 'src/Main.js' : 'dist/main.js'
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -229,19 +252,66 @@ function createArrowIndexHtml(keyed) {
 </head>
 <body>
   <div id="main"></div>
-  <script type="module" src="src/Main.js"></script>
+  <script type="module" src="${entryPoint}"></script>
 </body>
 </html>
 `
 }
 
-export function syncArrowBenchmark() {
-  const distFile = join(rootDir, 'packages', 'core', 'dist', 'index.min.mjs')
+function syncLocalArrowRuntime(srcDir) {
+  const distFile = join(rootDir, 'packages', 'core', 'dist', 'index.mjs')
+  const distChunksDir = join(rootDir, 'packages', 'core', 'dist', 'chunks')
   if (!existsSync(distFile)) {
-    throw new Error('Missing packages/core/dist/index.min.mjs. Run `pnpm build:runtime` first.')
+    throw new Error('Missing packages/core/dist/index.mjs. Run `pnpm build:runtime` first.')
+  }
+  if (!existsSync(distChunksDir)) {
+    throw new Error('Missing packages/core/dist/chunks. Run `pnpm build:runtime` first.')
   }
 
-  const version = getVersionLabel()
+  const chunkTargetDir = join(srcDir, 'chunks')
+
+  copyFileSync(distFile, join(srcDir, 'arrow.js'))
+  rmSync(chunkTargetDir, { recursive: true, force: true })
+  cpSync(distChunksDir, chunkTargetDir, { recursive: true })
+}
+
+function syncArrowPackageJson(packagePath, mode) {
+  const pkg = existsSync(packagePath)
+    ? JSON.parse(readFileSync(packagePath, 'utf8'))
+    : {}
+  pkg.name = 'js-framework-benchmark-arrowjs'
+  pkg.version = '1.0.0'
+  pkg.description = 'ArrowJS demo'
+  pkg['js-framework-benchmark'] ??= {}
+  pkg['js-framework-benchmark'].frameworkHomeURL = 'https://www.arrow-js.com/'
+
+  if (mode === 'local') {
+    pkg['js-framework-benchmark'].frameworkVersion = getVersionLabel()
+    delete pkg['js-framework-benchmark'].frameworkVersionFromPackage
+    delete pkg.scripts
+    delete pkg.dependencies
+    delete pkg.devDependencies
+  } else {
+    delete pkg['js-framework-benchmark'].frameworkVersion
+    pkg['js-framework-benchmark'].frameworkVersionFromPackage = '@arrow-js/core'
+    pkg.scripts = {
+      dev: 'esbuild src/Main.js --bundle --format=esm --target=es2020 --outfile=dist/main.js --watch',
+      'build-prod':
+        'esbuild src/Main.js --bundle --format=esm --minify --target=es2020 --outfile=dist/main.js',
+    }
+    pkg.dependencies = {
+      '@arrow-js/core': getPublishedCoreVersion(),
+    }
+    pkg.devDependencies = {
+      esbuild: '0.27.4',
+    }
+  }
+
+  writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`)
+}
+
+export function syncArrowBenchmark({ mode = benchmarkArrowMode } = {}) {
+  assertBenchmarkArrowMode(mode)
 
   for (const keyed of [true, false]) {
     const targetDir = frameworkDir(keyed)
@@ -251,16 +321,31 @@ export function syncArrowBenchmark() {
     const mainPath = join(srcDir, 'Main.js')
 
     mkdirSync(srcDir, { recursive: true })
-    copyFileSync(distFile, join(srcDir, 'arrow.js'))
-    writeFileSync(mainPath, createArrowMainSource(keyed))
-    writeFileSync(indexPath, createArrowIndexHtml(keyed))
 
-    if (existsSync(packagePath)) {
-      const pkg = JSON.parse(readFileSync(packagePath, 'utf8'))
-      pkg['js-framework-benchmark'] ??= {}
-      pkg['js-framework-benchmark'].frameworkVersion = version
-      pkg['js-framework-benchmark'].frameworkHomeURL = 'https://www.arrow-js.com/'
-      writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`)
+    if (mode === 'local') {
+      syncLocalArrowRuntime(srcDir)
+      rmSync(join(targetDir, 'dist'), { recursive: true, force: true })
+    } else {
+      rmSync(join(srcDir, 'arrow.js'), { force: true })
+      rmSync(join(srcDir, 'chunks'), { recursive: true, force: true })
     }
+
+    writeFileSync(mainPath, createArrowMainSource(keyed, mode))
+    writeFileSync(indexPath, createArrowIndexHtml(keyed, mode))
+    syncArrowPackageJson(packagePath, mode)
+  }
+}
+
+export function buildArrowBenchmark({ mode = benchmarkArrowMode } = {}) {
+  assertBenchmarkArrowMode(mode)
+
+  if (mode === 'local') {
+    return
+  }
+
+  for (const keyed of [true, false]) {
+    const targetDir = frameworkDir(keyed)
+    run('npm', ['install'], { cwd: targetDir })
+    run('npm', ['run', 'build-prod'], { cwd: targetDir })
   }
 }

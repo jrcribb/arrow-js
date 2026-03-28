@@ -276,6 +276,10 @@ declare module '@arrow-js/framework' {
 declare module '@arrow-js/sandbox' {
   import type { ArrowTemplate } from '@arrow-js/core'
 
+  export type HostBridgeFn = (...args: unknown[]) => unknown | Promise<unknown>
+  export type HostBridgeModule = Record<string, HostBridgeFn>
+  export type HostBridge = Record<string, HostBridgeModule>
+
   export interface SandboxProps {
     source: Record<string, string>
     shadowDOM?: boolean
@@ -294,7 +298,8 @@ declare module '@arrow-js/sandbox' {
     debug?: boolean
   }>(
     props: T,
-    events?: SandboxEvents
+    events?: SandboxEvents,
+    hostBridge?: HostBridge
   ): ArrowTemplate
 }
 

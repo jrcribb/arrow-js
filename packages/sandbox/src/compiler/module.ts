@@ -15,6 +15,7 @@ const supportedImports = new Set([
   'c',
   'html',
   't',
+  'onCleanup',
   'pick',
   'props',
   'reactive',
@@ -145,7 +146,7 @@ export function preprocessModule(
       String((part.value as any).cooked ?? (part.value as any).raw ?? '')
     )
     const expressionSources = (quasi.expressions as ESTreeNode[]).map((part) =>
-      source.slice(part.start || 0, part.end || 0)
+      output.slice(part.start || 0, part.end || 0)
     )
     const descriptorId = `${path}#template:${templateIndex++}`
     descriptors.push(compileTemplateDescriptor(descriptorId, strings))

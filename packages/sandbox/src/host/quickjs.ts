@@ -7,6 +7,7 @@ import type {
   CompiledSandboxGraph,
 } from '../compiler'
 import type {
+  HostBridge,
   HostToVmMessage,
   VmInitPayload,
   VmToHostMessage,
@@ -21,6 +22,7 @@ import { SandboxRuntimeError } from './errors'
 interface VmRunnerOptions {
   compiled: CompiledSandboxGraph
   debug?: boolean
+  hostBridge?: HostBridge
   onMessage: (message: VmToHostMessage) => void
 }
 
@@ -57,6 +59,11 @@ interface SandboxFetchRecord {
   timedOut: boolean
 }
 
+interface SandboxBridgeRecord {
+  deferred: any
+  active: boolean
+}
+
 export interface VmRunner {
   dispatch(message: HostToVmMessage): Promise<void>
   destroy(): void
@@ -87,6 +94,7 @@ const SAFE_FETCH_BLOCKED_HEADER_PATTERNS = [
 ]
 const SANDBOX_FETCH_TIMEOUT_MS = 15_000
 const SANDBOX_FETCH_MAX_RESPONSE_BYTES = 1_000_000
+const HOST_BRIDGE_MODULE_PREFIX = '/__arrow_sandbox/host-bridge/'
 const textDecoder = new TextDecoder()
 
 function isLocalHttpHost(hostname: string) {
@@ -271,13 +279,165 @@ function normalizeSpecifier(value: string) {
   return value.replace(/\/{2,}/g, '/')
 }
 
+function isValidBridgeExportName(value: string) {
+  return /^[A-Za-z_$][0-9A-Za-z_$]*$/.test(value)
+}
+
+function createHostBridgeModuleId(specifier: string) {
+  return `${HOST_BRIDGE_MODULE_PREFIX}${encodeURIComponent(specifier)}.js`
+}
+
+function createHostBridgeModules(hostBridge?: HostBridge) {
+  const moduleIds: Record<string, string> = {}
+  const modules: Record<string, string> = {}
+
+  for (const [specifier, bridgeModule] of Object.entries(hostBridge ?? {})) {
+    if (!specifier.trim()) {
+      throw new SandboxRuntimeError(
+        'Sandbox hostBridge specifiers must be non-empty strings.'
+      )
+    }
+
+    if (specifier === '@arrow-js/core' || specifier.startsWith('/')) {
+      throw new SandboxRuntimeError(
+        `Sandbox hostBridge cannot override reserved specifier "${specifier}".`
+      )
+    }
+
+    if (specifier.startsWith('.')) {
+      throw new SandboxRuntimeError(
+        `Sandbox hostBridge specifiers must be bare imports, received "${specifier}".`
+      )
+    }
+
+    const exportLines: string[] = []
+    for (const [name, handler] of Object.entries(bridgeModule)) {
+      if (typeof handler !== 'function') {
+        throw new SandboxRuntimeError(
+          `Sandbox hostBridge export "${name}" from "${specifier}" must be a function.`
+        )
+      }
+
+      if (!isValidBridgeExportName(name)) {
+        throw new SandboxRuntimeError(
+          `Sandbox hostBridge export "${name}" from "${specifier}" must be a valid identifier.`
+        )
+      }
+
+      exportLines.push(
+        `export const ${name} = (...args) => globalThis.__arrowHostBridge(${JSON.stringify(
+          specifier
+        )}, ${JSON.stringify(name)}, ...args)`
+      )
+    }
+
+    const moduleId = createHostBridgeModuleId(specifier)
+    moduleIds[specifier] = moduleId
+    modules[moduleId] = exportLines.join('\n')
+  }
+
+  return {
+    moduleIds,
+    modules,
+  }
+}
+
+function normalizeBridgeValue(
+  value: unknown,
+  path: string,
+  seen = new Set<object>()
+): unknown {
+  if (value == null || typeof value === 'string' || typeof value === 'boolean') {
+    return value
+  }
+
+  if (typeof value === 'undefined') {
+    return undefined
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new SandboxRuntimeError(
+        `Sandbox hostBridge ${path} must use finite numbers.`
+      )
+    }
+    return value
+  }
+
+  if (typeof value === 'bigint' || typeof value === 'symbol' || typeof value === 'function') {
+    throw new SandboxRuntimeError(
+      `Sandbox hostBridge ${path} must be plain serializable data.`
+    )
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry, index) =>
+      normalizeBridgeValue(entry, `${path}[${index}]`, seen)
+    )
+  }
+
+  if (typeof value !== 'object') {
+    return value
+  }
+
+  if (seen.has(value as object)) {
+    throw new SandboxRuntimeError(
+      `Sandbox hostBridge ${path} must not contain circular references.`
+    )
+  }
+
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new SandboxRuntimeError(
+      `Sandbox hostBridge ${path} must use plain objects.`
+    )
+  }
+
+  seen.add(value as object)
+  try {
+    const output: Record<string, unknown> = {}
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = normalizeBridgeValue(entry, `${path}.${key}`, seen)
+    }
+    return output
+  } finally {
+    seen.delete(value as object)
+  }
+}
+
+function toBridgeSource(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+
+  switch (typeof value) {
+    case 'string':
+      return JSON.stringify(value)
+    case 'number':
+    case 'boolean':
+      return JSON.stringify(value)
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => toBridgeSource(entry)).join(', ')}]`
+  }
+
+  return `{${Object.entries(value as Record<string, unknown>)
+    .map(([key, entry]) => `${JSON.stringify(key)}:${toBridgeSource(entry)}`)
+    .join(', ')}}`
+}
+
 function resolveModuleSpecifier(
   baseModuleName: string,
   requestedName: string,
-  modules: Record<string, string>
+  modules: Record<string, string>,
+  hostBridgeModuleIds: Record<string, string>
 ) {
   if (requestedName === '@arrow-js/core') {
     return VM_CORE_MODULE_ID
+  }
+
+  if (requestedName in hostBridgeModuleIds) {
+    return hostBridgeModuleIds[requestedName] as string
   }
 
   if (requestedName.startsWith('/')) {
@@ -356,8 +516,11 @@ export async function createVmRunner(
   let destroyed = false
   let nextTimerId = 0
   const timers = new Map<number, SandboxTimerRecord>()
+  const { moduleIds: hostBridgeModuleIds, modules: hostBridgeModules } =
+    createHostBridgeModules(options.hostBridge)
   const modules = {
     ...vmRuntimeModules,
+    ...hostBridgeModules,
     ...options.compiled.modules,
   }
 
@@ -405,6 +568,7 @@ export async function createVmRunner(
   }
 
   const pendingFetches = new Set<SandboxFetchRecord>()
+  const pendingBridgeCalls = new Set<SandboxBridgeRecord>()
   const createErrorHandle = (error: unknown) => {
     if (error instanceof Error) {
       return context.newError({
@@ -471,6 +635,14 @@ export async function createVmRunner(
     )
   }
 
+  const createBridgeValueHandle = (value: unknown) =>
+    context.unwrapResult(
+      context.evalCode(
+        `(${toBridgeSource(value)})`,
+        '/__arrow_sandbox/host-bridge-value.js'
+      )
+    )
+
   const clearPendingFetch = (record: SandboxFetchRecord) => {
     if (!record.active) return
 
@@ -480,6 +652,12 @@ export async function createVmRunner(
       clearTimeout(record.timeoutHandle)
       record.timeoutHandle = null
     }
+  }
+
+  const clearPendingBridgeCall = (record: SandboxBridgeRecord) => {
+    if (!record.active) return
+    record.active = false
+    pendingBridgeCalls.delete(record)
   }
 
   const rejectPendingFetch = (record: SandboxFetchRecord, error: unknown) => {
@@ -518,6 +696,56 @@ export async function createVmRunner(
         record.deferred.resolve(responseHandle)
       } finally {
         responseHandle.dispose()
+      }
+    } catch (error) {
+      const errorHandle = createErrorHandle(error)
+      try {
+        record.deferred.reject(errorHandle)
+      } finally {
+        errorHandle.dispose()
+      }
+    }
+
+    schedulePendingJobDrain()
+  }
+
+  const rejectPendingBridgeCall = (record: SandboxBridgeRecord, error: unknown) => {
+    if (!record.active) return
+    clearPendingBridgeCall(record)
+
+    if (destroyed) {
+      record.deferred.dispose()
+      return
+    }
+
+    const errorHandle = createErrorHandle(error)
+    try {
+      record.deferred.reject(errorHandle)
+    } finally {
+      errorHandle.dispose()
+    }
+
+    schedulePendingJobDrain()
+  }
+
+  const resolvePendingBridgeCall = (
+    record: SandboxBridgeRecord,
+    payload: unknown
+  ) => {
+    if (!record.active) return
+    clearPendingBridgeCall(record)
+
+    if (destroyed) {
+      record.deferred.dispose()
+      return
+    }
+
+    try {
+      const valueHandle = createBridgeValueHandle(payload)
+      try {
+        record.deferred.resolve(valueHandle)
+      } finally {
+        valueHandle.dispose()
       }
     } catch (error) {
       const errorHandle = createErrorHandle(error)
@@ -634,6 +862,66 @@ export async function createVmRunner(
   })
   context.setProp(context.global, '__arrowHostSend', hostSend)
   hostSend.dispose()
+
+  const hostBridgeHandle = context.newFunction(
+    '__arrowHostBridge',
+    (specifierHandle: any, exportNameHandle: any, ...argHandles: any[]) => {
+      if (context.typeof(specifierHandle) !== 'string') {
+        throw new SandboxRuntimeError(
+          'Sandbox hostBridge requires a string module specifier.'
+        )
+      }
+
+      if (context.typeof(exportNameHandle) !== 'string') {
+        throw new SandboxRuntimeError(
+          'Sandbox hostBridge requires a string export name.'
+        )
+      }
+
+      const specifier = context.getString(specifierHandle)
+      const exportName = context.getString(exportNameHandle)
+      const bridgeModule = options.hostBridge?.[specifier]
+      const bridgeHandler = bridgeModule?.[exportName]
+
+      if (!bridgeModule || typeof bridgeHandler !== 'function') {
+        throw new SandboxRuntimeError(
+          `Unknown sandbox hostBridge export "${exportName}" from "${specifier}".`
+        )
+      }
+
+      const args = argHandles.map((argHandle, index) =>
+        normalizeBridgeValue(
+          context.dump(argHandle),
+          `argument[${index}]`
+        )
+      )
+
+      const deferred = context.newPromise()
+      const record: SandboxBridgeRecord = {
+        deferred,
+        active: true,
+      }
+      pendingBridgeCalls.add(record)
+
+      void Promise.resolve()
+        .then(() => bridgeHandler(...args))
+        .then((value) => {
+          try {
+            resolvePendingBridgeCall(
+              record,
+              normalizeBridgeValue(value, 'return value')
+            )
+          } catch (error) {
+            rejectPendingBridgeCall(record, error)
+          }
+        })
+        .catch((error) => rejectPendingBridgeCall(record, error))
+
+      return deferred.handle
+    }
+  )
+  context.setProp(context.global, '__arrowHostBridge', hostBridgeHandle)
+  hostBridgeHandle.dispose()
 
   const setTimeoutHandle = context.newFunction(
     'setTimeout',
@@ -785,7 +1073,12 @@ export async function createVmRunner(
       return source
     },
     (baseModuleName: string, requestedName: string) =>
-      resolveModuleSpecifier(baseModuleName, requestedName, modules)
+      resolveModuleSpecifier(
+        baseModuleName,
+        requestedName,
+        modules,
+        hostBridgeModuleIds
+      )
   )
 
   await evalModule(
@@ -824,9 +1117,13 @@ export async function createVmRunner(
           record.controller.abort()
           record.deferred.dispose()
         }
+        for (const record of Array.from(pendingBridgeCalls)) {
+          clearPendingBridgeCall(record)
+          record.deferred.dispose()
+        }
         try {
           const result = context.evalCode(
-            'globalThis.__arrowHostSend = undefined; globalThis.console = undefined; globalThis.setTimeout = undefined; globalThis.clearTimeout = undefined; globalThis.setInterval = undefined; globalThis.clearInterval = undefined; globalThis.fetch = undefined; globalThis.output = undefined;'
+            'globalThis.__arrowHostSend = undefined; globalThis.__arrowHostBridge = undefined; globalThis.console = undefined; globalThis.setTimeout = undefined; globalThis.clearTimeout = undefined; globalThis.setInterval = undefined; globalThis.clearInterval = undefined; globalThis.fetch = undefined; globalThis.output = undefined;'
           )
           context.unwrapResult(result).dispose()
         } catch {}

@@ -1,4 +1,15 @@
-import { benchmarkRepoDir, benchmarkTag, ensureBenchmarkRepo } from './lib.mjs'
+import {
+  benchmarkArrowMode,
+  benchmarkRepoDir,
+  benchmarkTag,
+  buildArrowBenchmark,
+  ensureBenchmarkRepo,
+  syncArrowBenchmark,
+} from './lib.mjs'
 
 ensureBenchmarkRepo({ install: true })
-console.log(`Benchmark repo ready at ${benchmarkRepoDir} (${benchmarkTag})`)
+syncArrowBenchmark()
+buildArrowBenchmark()
+console.log(
+  `Benchmark repo ready at ${benchmarkRepoDir} (${benchmarkTag}, mode: ${benchmarkArrowMode})`
+)

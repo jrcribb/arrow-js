@@ -4,7 +4,7 @@ export {
   html,
   html as t,
   nextTick,
-  output,
+  onCleanup,
   pick,
   pick as props,
   reactive,
